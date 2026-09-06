@@ -1,0 +1,11 @@
+{
+  "name": "SYNTRONIX '26 — Admin Portal",
+  "description": "Internal administration portal and QR attendance management system for SYNTRONIX '26 International Technical Symposium, Department of CSE, EGS Pillay Engineering College. Designed & Developed by Aegis Academy.",
+  "requestFramePermissions": [
+    "camera"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
+
