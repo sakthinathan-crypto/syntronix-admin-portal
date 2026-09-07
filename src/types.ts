@@ -109,18 +109,33 @@ export interface QrResetLog {
 }
 
 export interface ParticipantQRData {
+  unique_id: string;
+  uniqueId: string;
   name: string;
+  registrationNo: string;
   universityRegistrationNumber: string;
   email: string;
+  mobile: string;
   mobileNumber: string;
+  college: string;
   collegeName: string;
   fieldOfStudy: string;
   department: string;
   teamName: string;
   leaderName: string;
+  members: string;
   membersName: string;
-  uniqueId: string;
+  degree: string;
+  year: string;
+  collegeLocation: string;
+  teamLeaderEmail: string;
+  member1Mobile: string;
+  member2Mobile: string;
+  selectedEvents: string;
   registeredEvents: string[];
+  event?: string;
+  timestamp?: string;
+  [key: string]: any;
 }
 
 export interface ScanResponse {

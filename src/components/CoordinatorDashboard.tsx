@@ -18,11 +18,13 @@ import { getCoordinatorStats, getAttendance } from '../services/api';
 interface CoordinatorDashboardProps {
   session: AuthSession;
   onOpenScanner: () => void;
+  refreshTrigger?: number;
 }
 
 export const CoordinatorDashboard: React.FC<CoordinatorDashboardProps> = ({
   session,
   onOpenScanner,
+  refreshTrigger,
 }) => {
   const coordinatorName = session.user.name;
   const assignedEvent = session.user.assignedEvent || 'Assigned Event';
@@ -56,7 +58,7 @@ export const CoordinatorDashboard: React.FC<CoordinatorDashboardProps> = ({
 
   useEffect(() => {
     fetchDashboardData();
-  }, [assignedEvent]);
+  }, [assignedEvent, refreshTrigger]);
 
   // Filter attendance records
   const filteredRecords = attendanceList.filter((rec) => {

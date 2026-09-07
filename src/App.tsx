@@ -35,6 +35,7 @@ export default function App() {
   const [scanResult, setScanResult] = useState<ScanResponse | null>(null);
   const [isResultOpen, setIsResultOpen] = useState(false);
   const [isProcessingScan, setIsProcessingScan] = useState(false);
+  const [dashboardRefreshTrigger, setDashboardRefreshTrigger] = useState(0);
 
   // Initialize session and backend config on load
   useEffect(() => {
@@ -73,8 +74,9 @@ export default function App() {
     try {
       setIsProcessingScan(true);
       setIsScannerOpen(false);
-      const res = await scanParticipantQR(participant, assignedEvent, coordinatorName);
+      const res = await scanParticipantQR(participant, coordinatorName, assignedEvent);
       setScanResult(res);
+      setDashboardRefreshTrigger((prev) => prev + 1);
       setIsResultOpen(true);
     } catch (err: any) {
       setScanResult({
@@ -129,6 +131,7 @@ export default function App() {
           <CoordinatorDashboard
             session={session}
             onOpenScanner={() => setIsScannerOpen(true)}
+            refreshTrigger={dashboardRefreshTrigger}
           />
         )}
       </main>

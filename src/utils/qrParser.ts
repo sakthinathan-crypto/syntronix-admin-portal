@@ -129,7 +129,63 @@ export function parseParticipantQR(rawData: string): ParticipantQRData | null {
   return null;
 }
 
-function normalizeParticipantObject(obj: any): ParticipantQRData {
+export function isParticipantRegisteredForEvent(
+  registeredEvents: string[],
+  targetEvent: string
+): boolean {
+  if (!targetEvent || !registeredEvents || registeredEvents.length === 0) return false;
+  const targetNorm = targetEvent.trim().toLowerCase();
+  const targetClean = targetNorm.replace(/[^a-z0-9]/g, '');
+
+  return registeredEvents.some((ev) => {
+    if (!ev) return false;
+    const evNorm = ev.trim().toLowerCase();
+    const evClean = evNorm.replace(/[^a-z0-9]/g, '');
+
+    // 1. Exact or cleaned string match
+    if (evNorm === targetNorm || evClean === targetClean) return true;
+
+    // 2. Common typo resilience (e.g. "Paper Presentaion" vs "Paper Presentation")
+    if (
+      (evClean.startsWith('paperpresent') && targetClean.startsWith('paperpresent')) ||
+      (evClean.startsWith('postermak') && targetClean.startsWith('postermak')) ||
+      (evClean.startsWith('codedebug') && targetClean.startsWith('codedebug')) ||
+      (evClean.startsWith('webdesign') && targetClean.startsWith('webdesign')) ||
+      (evClean.startsWith('techquiz') && targetClean.startsWith('techquiz'))
+    ) {
+      return true;
+    }
+
+    // 3. Substring check if long enough
+    if (targetClean.length >= 8 && (evClean.includes(targetClean) || targetClean.includes(evClean))) {
+      return true;
+    }
+
+    return false;
+  });
+}
+
+export function parseSelectedEvents(rawEvents: any): string[] {
+  if (!rawEvents) return [];
+  if (Array.isArray(rawEvents)) {
+    return rawEvents.map((e) => String(e).trim()).filter(Boolean);
+  }
+  if (typeof rawEvents === 'string') {
+    const trimmed = rawEvents.trim();
+    if (!trimmed) return [];
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (Array.isArray(parsed)) {
+        return parsed.map((e) => String(e).trim()).filter(Boolean);
+      }
+    } catch {}
+    // Split on comma, semicolon, newline, or pipe
+    return trimmed.split(/[,;\n\r|]+/).map((e) => e.trim()).filter(Boolean);
+  }
+  return [String(rawEvents).trim()];
+}
+
+export function normalizeParticipantObject(obj: any): ParticipantQRData {
   const findValue = (...keys: string[]): string => {
     for (const k of keys) {
       if (obj[k] !== undefined && obj[k] !== null && String(obj[k]).trim() !== '') {
@@ -139,11 +195,11 @@ function normalizeParticipantObject(obj: any): ParticipantQRData {
     return '';
   };
 
-  // Find unique ID
-  const uniqueId =
+  // 1. Find unique ID (Use unique_id as participant's unique identifier)
+  const unique_id =
     findValue(
-      'uniqueId',
       'unique_id',
+      'uniqueId',
       'uniqueParticipantId',
       'unique_participant_id',
       'participantId',
@@ -153,72 +209,87 @@ function normalizeParticipantObject(obj: any): ParticipantQRData {
       'uid'
     ) || 'SYN26-UNKNOWN';
 
-  // Find Name
-  const name = findValue('name', 'participantName', 'participant_name', 'studentName', 'student_name') || 'Participant';
+  // 2. Name
+  const name =
+    findValue('name', 'participantName', 'participant_name', 'studentName', 'student_name') ||
+    'Participant';
 
-  // Registration Number
-  const universityRegistrationNumber = findValue(
-    'universityRegistrationNumber',
-    'university_registration_number',
+  // 3. Registration Number
+  const registrationNo = findValue(
+    'registrationNo',
+    'registration_no',
     'registrationNumber',
     'registration_number',
+    'universityRegistrationNumber',
+    'university_registration_number',
     'regNo',
     'reg_no',
     'registerNumber',
     'rollNo'
   );
 
+  // 4. Contact & Personal Info
   const email = findValue('email', 'emailId', 'email_id', 'mail');
-  const mobileNumber = findValue('mobileNumber', 'mobile_number', 'mobile', 'phone', 'contact');
-  const collegeName = findValue('collegeName', 'college_name', 'college', 'institution');
+  const mobile = findValue('mobile', 'mobileNumber', 'mobile_number', 'phone', 'contact');
+  const college = findValue('college', 'collegeName', 'college_name', 'institution');
   const fieldOfStudy = findValue('fieldOfStudy', 'field_of_study', 'degree', 'course');
-  const department = findValue('department', 'dept', 'branch') || 'CSE';
+  const department = findValue('department', 'dept', 'branch');
   const teamName = findValue('teamName', 'team_name', 'team');
   const leaderName = findValue('leaderName', 'leader_name', 'leader') || name;
-  const membersName = findValue('membersName', 'members_name', 'members', 'teamMembers', 'team_members');
+  const members = findValue('members', 'membersName', 'members_name', 'teamMembers', 'team_members');
+  const degree = findValue('degree');
+  const year = findValue('year');
+  const collegeLocation = findValue('collegeLocation', 'college_location', 'location');
+  const teamLeaderEmail = findValue('teamLeaderEmail', 'team_leader_email', 'leaderEmail', 'leader_email');
+  const member1Mobile = findValue('member1Mobile', 'member1_mobile', 'member1Phone');
+  const member2Mobile = findValue('member2Mobile', 'member2_mobile', 'member2Phone');
 
-  // Registered Events
-  let registeredEvents: string[] = [];
-  const rawEvents =
+  // 5. Selected Events (may contain one or multiple events)
+  const rawSelectedEvents =
+    obj.selectedEvents ||
+    obj.selected_events ||
     obj.registeredEvents ||
     obj.registered_events ||
     obj.events ||
-    obj.registered ||
-    obj.selectedEvents;
+    obj.registered;
 
-  if (Array.isArray(rawEvents)) {
-    registeredEvents = rawEvents.map((e) => String(e).trim()).filter(Boolean);
-  } else if (typeof rawEvents === 'string') {
-    try {
-      const parsed = JSON.parse(rawEvents);
-      if (Array.isArray(parsed)) {
-        registeredEvents = parsed.map((e) => String(e).trim()).filter(Boolean);
-      } else {
-        registeredEvents = rawEvents.split(',').map((e) => e.trim()).filter(Boolean);
-      }
-    } catch {
-      registeredEvents = rawEvents.split(',').map((e) => e.trim()).filter(Boolean);
-    }
-  }
+  const selectedEventsStr =
+    typeof rawSelectedEvents === 'string'
+      ? rawSelectedEvents.trim()
+      : Array.isArray(rawSelectedEvents)
+      ? rawSelectedEvents.join(', ')
+      : '';
 
-  // Default fallback if no events explicitly listed
-  if (registeredEvents.length === 0) {
-    registeredEvents = ['Paper Presentation'];
-  }
+  const registeredEvents = parseSelectedEvents(rawSelectedEvents);
 
   return {
-    uniqueId,
+    ...obj,
+    unique_id,
+    uniqueId: unique_id,
     name,
-    universityRegistrationNumber,
+    registrationNo,
+    universityRegistrationNumber: registrationNo,
     email,
-    mobileNumber,
-    collegeName,
+    mobile,
+    mobileNumber: mobile,
+    college,
+    collegeName: college,
     fieldOfStudy,
     department,
     teamName,
     leaderName,
-    membersName,
+    members,
+    membersName: members,
+    degree,
+    year,
+    collegeLocation,
+    teamLeaderEmail,
+    member1Mobile,
+    member2Mobile,
+    selectedEvents: selectedEventsStr,
     registeredEvents,
+    event: obj.event || "SYNTRONIX '26",
+    timestamp: obj.timestamp || new Date().toISOString(),
   };
 }
 

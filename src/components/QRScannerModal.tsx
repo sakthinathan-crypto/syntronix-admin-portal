@@ -12,7 +12,11 @@ import {
   CheckCircle2,
   ImageIcon,
 } from 'lucide-react';
-import { parseParticipantQR, generateSampleParticipantQR } from '../utils/qrParser';
+import {
+  parseParticipantQR,
+  generateSampleParticipantQR,
+  normalizeParticipantObject,
+} from '../utils/qrParser';
 import { ParticipantQRData } from '../types';
 
 interface QRScannerModalProps {
@@ -180,20 +184,11 @@ export const QRScannerModal: React.FC<QRScannerModalProps> = ({
       let participant = parseParticipantQR(decodedText);
       if (!participant) {
         // Fallback placeholder so existing Attendance API handles validation
-        participant = {
+        participant = normalizeParticipantObject({
+          unique_id: 'INVALID_PAYLOAD',
           uniqueId: 'INVALID_PAYLOAD',
           name: 'Unrecognized QR Payload',
-          universityRegistrationNumber: '',
-          email: '',
-          mobileNumber: '',
-          collegeName: '',
-          fieldOfStudy: '',
-          department: '',
-          teamName: '',
-          leaderName: '',
-          membersName: '',
-          registeredEvents: [],
-        };
+        });
       }
 
       // Brief 120ms pause for visual feedback before opening attendance result modal

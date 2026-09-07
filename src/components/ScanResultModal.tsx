@@ -222,26 +222,30 @@ export const ScanResultModal: React.FC<ScanResultModalProps> = ({
                   <span className="text-sm font-bold text-white">{participant.name}</span>
                 </div>
                 <span className="font-mono text-xs font-bold px-2.5 py-0.5 rounded-full bg-[#F27D26]/10 text-[#F27D26] border border-[#F27D26]/20">
-                  {participant.uniqueId}
+                  {participant.unique_id || participant.uniqueId}
                 </span>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
                 <div>
                   <span className="text-[10px] text-white/40 uppercase block font-mono">
-                    Univ. Reg Number
+                    Registration No
                   </span>
                   <span className="text-white font-mono">
-                    {participant.universityRegistrationNumber || 'N/A'}
+                    {participant.registrationNo || participant.universityRegistrationNumber || 'N/A'}
                   </span>
                 </div>
 
                 <div>
                   <span className="text-[10px] text-white/40 uppercase block font-mono">
-                    College Name
+                    College / Institution
                   </span>
-                  <span className="text-white truncate block" title={participant.collegeName}>
-                    {participant.collegeName || 'N/A'}
+                  <span
+                    className="text-white truncate block"
+                    title={`${participant.college || participant.collegeName || ''} ${participant.collegeLocation || ''}`}
+                  >
+                    {participant.college || participant.collegeName || 'N/A'}
+                    {participant.collegeLocation ? ` (${participant.collegeLocation})` : ''}
                   </span>
                 </div>
 
@@ -250,29 +254,70 @@ export const ScanResultModal: React.FC<ScanResultModalProps> = ({
                     Department & Degree
                   </span>
                   <span className="text-white">
-                    {participant.department} {participant.fieldOfStudy ? `• ${participant.fieldOfStudy}` : ''}
+                    {participant.degree ? `${participant.degree} ` : ''}
+                    {participant.department || 'N/A'}
+                    {participant.year ? ` • Year ${participant.year}` : ''}
                   </span>
                 </div>
+
+                {participant.fieldOfStudy && (
+                  <div>
+                    <span className="text-[10px] text-white/40 uppercase block font-mono">
+                      Field of Study
+                    </span>
+                    <span className="text-white truncate block">
+                      {participant.fieldOfStudy}
+                    </span>
+                  </div>
+                )}
 
                 <div>
                   <span className="text-[10px] text-white/40 uppercase block font-mono">
                     Contact Details
                   </span>
                   <span className="text-white font-mono text-[11px] block">
-                    {participant.mobileNumber || participant.email || 'N/A'}
+                    {participant.mobile || participant.mobileNumber || participant.email || 'N/A'}
                   </span>
+                  {participant.email && (participant.mobile || participant.mobileNumber) && (
+                    <span className="text-white/60 font-mono text-[10px] block truncate">
+                      {participant.email}
+                    </span>
+                  )}
                 </div>
 
-                {participant.teamName && (
-                  <div className="sm:col-span-2 pt-1">
+                {(participant.teamName || participant.leaderName || participant.members || participant.membersName) && (
+                  <div className="sm:col-span-2 pt-1 border-t border-white/5 space-y-1">
                     <span className="text-[10px] text-white/40 uppercase block font-mono">
-                      Team & Members
+                      Team Information
                     </span>
-                    <span className="text-white">
-                      <span className="font-semibold text-[#F27D26]">{participant.teamName}</span>
-                      {participant.leaderName && ` (Leader: ${participant.leaderName})`}
-                      {participant.membersName && ` • Members: ${participant.membersName}`}
-                    </span>
+                    <div className="text-white space-y-0.5">
+                      {participant.teamName && (
+                        <div>
+                          <span className="text-white/50">Team: </span>
+                          <span className="font-semibold text-[#F27D26]">{participant.teamName}</span>
+                        </div>
+                      )}
+                      {participant.leaderName && (
+                        <div>
+                          <span className="text-white/50">Leader: </span>
+                          <span>{participant.leaderName}</span>
+                          {participant.teamLeaderEmail && (
+                            <span className="text-white/40 text-[11px]"> ({participant.teamLeaderEmail})</span>
+                          )}
+                        </div>
+                      )}
+                      {(participant.members || participant.membersName) && (
+                        <div>
+                          <span className="text-white/50">Members: </span>
+                          <span className="text-white/80">{participant.members || participant.membersName}</span>
+                        </div>
+                      )}
+                      {(participant.member1Mobile || participant.member2Mobile) && (
+                        <div className="text-white/50 text-[11px] font-mono">
+                          Mobiles: {[participant.member1Mobile, participant.member2Mobile].filter(Boolean).join(', ')}
+                        </div>
+                      )}
+                    </div>
                   </div>
                 )}
               </div>
@@ -280,25 +325,30 @@ export const ScanResultModal: React.FC<ScanResultModalProps> = ({
               {/* Registered Events Status Chips */}
               <div className="pt-2 border-t border-white/10">
                 <span className="text-[10px] text-white/40 uppercase block font-mono mb-1.5">
-                  All Registered Events:
+                  Registered Events ({participant.registeredEvents?.length || 0}):
                 </span>
                 <div className="flex flex-wrap gap-1.5">
                   {participant.registeredEvents?.map((ev, i) => {
                     const isAttended = attendedEvents.some(
                       (ae) => ae.toLowerCase() === ev.toLowerCase()
                     );
+                    const isCurrent = ev.toLowerCase() === scannedEvent.toLowerCase();
                     return (
                       <span
                         key={i}
-                        className={`text-[11px] font-mono px-2.5 py-1 rounded-lg border ${
+                        className={`text-[11px] font-mono px-2.5 py-1 rounded-lg border flex items-center gap-1.5 ${
                           isAttended
                             ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                            : isCurrent
+                            ? 'bg-[#F27D26]/10 text-[#F27D26] border-[#F27D26]/20 font-bold'
                             : 'bg-white/5 text-white/40 border-white/10'
                         }`}
                       >
-                        {isAttended ? '✓ ' : '○ '}
-                        {ev}
-                        {isAttended ? ' (PRESENT)' : ''}
+                        <span>{isAttended ? '✓' : isCurrent ? '▶' : '○'}</span>
+                        <span>{ev}</span>
+                        <span className="text-[9px] opacity-80">
+                          {isAttended ? '(ATTENDED)' : isCurrent ? '(CURRENT)' : '(PENDING)'}
+                        </span>
                       </span>
                     );
                   })}

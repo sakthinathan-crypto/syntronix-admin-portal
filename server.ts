@@ -91,6 +91,13 @@ interface AttendanceRow {
   teamName: string;
   leaderName: string;
   membersName: string;
+  degree?: string;
+  year?: string;
+  collegeLocation?: string;
+  teamLeaderEmail?: string;
+  member1Mobile?: string;
+  member2Mobile?: string;
+  selectedEvents?: string;
   registeredEvents: string[];
   scannedEvent: string;
   coordinatorName: string;
@@ -915,12 +922,72 @@ app.delete('/api/jury/:id', async (req, res) => {
   res.json({ success: true, message: 'Jury member deactivated successfully.' });
 });
 
+// Event matching and parsing helpers for participant attendance
+function isParticipantRegisteredForEvent(
+  registeredEvents: string[],
+  targetEvent: string
+): boolean {
+  if (!targetEvent || !registeredEvents || registeredEvents.length === 0) return false;
+  const targetNorm = targetEvent.trim().toLowerCase();
+  const targetClean = targetNorm.replace(/[^a-z0-9]/g, '');
+
+  return registeredEvents.some((ev) => {
+    if (!ev) return false;
+    const evNorm = ev.trim().toLowerCase();
+    const evClean = evNorm.replace(/[^a-z0-9]/g, '');
+
+    // 1. Exact or cleaned string match
+    if (evNorm === targetNorm || evClean === targetClean) return true;
+
+    // 2. Common typo resilience (e.g. "Paper Presentaion" vs "Paper Presentation")
+    if (
+      (evClean.startsWith('paperpresent') && targetClean.startsWith('paperpresent')) ||
+      (evClean.startsWith('postermak') && targetClean.startsWith('postermak')) ||
+      (evClean.startsWith('codedebug') && targetClean.startsWith('codedebug')) ||
+      (evClean.startsWith('webdesign') && targetClean.startsWith('webdesign')) ||
+      (evClean.startsWith('techquiz') && targetClean.startsWith('techquiz'))
+    ) {
+      return true;
+    }
+
+    // 3. Substring check if long enough
+    if (targetClean.length >= 8 && (evClean.includes(targetClean) || targetClean.includes(evClean))) {
+      return true;
+    }
+
+    return false;
+  });
+}
+
+function parseSelectedEvents(rawEvents: any): string[] {
+  if (!rawEvents) return [];
+  if (Array.isArray(rawEvents)) {
+    return rawEvents.map((e) => String(e).trim()).filter(Boolean);
+  }
+  if (typeof rawEvents === 'string') {
+    const trimmed = rawEvents.trim();
+    if (!trimmed) return [];
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (Array.isArray(parsed)) {
+        return parsed.map((e) => String(e).trim()).filter(Boolean);
+      }
+    } catch {}
+    return trimmed.split(/[,;\n\r|]+/).map((e) => e.trim()).filter(Boolean);
+  }
+  return [String(rawEvents).trim()];
+}
+
 // 7. QR CODE ATTENDANCE MARKING WITH STRICT CHECKS & LOCK
 app.post('/api/attendance/mark', async (req, res) => {
   const { participant, coordinatorName, coordinatorAssignedEvent } = req.body;
 
-  if (!participant || !participant.uniqueId) {
-    logScan('', 'Unknown', coordinatorName || '', coordinatorAssignedEvent || '', coordinatorAssignedEvent || '', 'INVALID_QR', 'Missing participant details in QR');
+  const uniqueId = String(
+    (participant && (participant.unique_id || participant.uniqueId)) || ''
+  ).trim();
+
+  if (!participant || !uniqueId || uniqueId === 'INVALID_PAYLOAD') {
+    logScan('', 'Unknown', coordinatorName || '', coordinatorAssignedEvent || '', coordinatorAssignedEvent || '', 'INVALID_QR', 'Missing or invalid participant details in QR');
     res.json({
       success: false,
       result: 'INVALID_QR',
@@ -929,40 +996,23 @@ app.post('/api/attendance/mark', async (req, res) => {
     return;
   }
 
-  const uniqueId = String(participant.uniqueId).trim();
   const participantName = String(participant.name || '').trim();
   const assignedEvent = (coordinatorAssignedEvent || '').trim();
   const coordName = coordinatorName || 'Coordinator';
 
-  // Registered Events
-  const rawEvents = participant.registeredEvents;
-  let registeredEvents: string[] = [];
-  if (Array.isArray(rawEvents)) {
-    registeredEvents = rawEvents.map(String);
-  } else if (typeof rawEvents === 'string') {
-    try {
-      const parsed = JSON.parse(rawEvents);
-      if (Array.isArray(parsed)) {
-        registeredEvents = parsed.map(String);
-      } else {
-        registeredEvents = [String(rawEvents)];
-      }
-    } catch {
-      registeredEvents = [rawEvents];
-    }
-  }
+  // Registered Events from selectedEvents or registeredEvents
+  const rawEvents = participant.selectedEvents || participant.registeredEvents;
+  const registeredEvents = parseSelectedEvents(rawEvents);
 
   // STEP 4 & 5: Check whether the participant registered for that event
-  const isRegistered = registeredEvents.some(
-    (e) => e.trim().toLowerCase() === assignedEvent.toLowerCase()
-  );
+  const isRegistered = isParticipantRegisteredForEvent(registeredEvents, assignedEvent);
 
   if (!isRegistered) {
     logScan(uniqueId, participantName, coordName, assignedEvent, assignedEvent, 'NOT_REGISTERED', `Participant not registered for ${assignedEvent}`);
     res.json({
       success: false,
       result: 'NOT_REGISTERED',
-      message: 'NOT REGISTERED FOR THIS EVENT',
+      message: 'PARTICIPANT FOUND — NOT REGISTERED FOR THIS EVENT',
       participant,
       scannedEvent: assignedEvent,
       coordinatorName: coordName,
@@ -986,7 +1036,8 @@ app.post('/api/attendance/mark', async (req, res) => {
     const existing = db.attendance.find(
       (a) =>
         a.uniqueId.toLowerCase() === uniqueId.toLowerCase() &&
-        a.scannedEvent.toLowerCase() === assignedEvent.toLowerCase() &&
+        (a.scannedEvent.toLowerCase() === assignedEvent.toLowerCase() ||
+          isParticipantRegisteredForEvent([a.scannedEvent], assignedEvent)) &&
         a.attendanceStatus === 'PRESENT'
     );
 
@@ -996,7 +1047,7 @@ app.post('/api/attendance/mark', async (req, res) => {
       res.json({
         success: false,
         result: 'ALREADY_MARKED',
-        message: 'ALREADY MARKED',
+        message: 'EVENT ATTENDANCE ALREADY USED / MARKED',
         participant,
         scannedEvent: assignedEvent,
         coordinatorName: coordName,
@@ -1013,18 +1064,45 @@ app.post('/api/attendance/mark', async (req, res) => {
     let gasAttendanceSuccess = false;
     try {
       const gasResult = await callAttendanceApiPost('markAttendance', {
-        participant: { ...participant, registeredEvents },
+        action: 'markAttendance',
+        participant: { ...participant, unique_id: uniqueId, uniqueId, registeredEvents },
         uniqueId,
+        unique_id: uniqueId,
+        name: participantName,
+        registrationNo: participant.registrationNo || participant.universityRegistrationNumber || '',
+        universityRegNumber: participant.registrationNo || participant.universityRegistrationNumber || '',
+        email: participant.email || '',
+        mobile: participant.mobile || participant.mobileNumber || '',
+        college: participant.college || participant.collegeName || '',
+        department: participant.department || '',
+        fieldOfStudy: participant.fieldOfStudy || '',
+        teamName: participant.teamName || '',
+        leaderName: participant.leaderName || '',
+        members: participant.members || participant.membersName || '',
+        degree: participant.degree || '',
+        year: participant.year || '',
+        collegeLocation: participant.collegeLocation || '',
+        teamLeaderEmail: participant.teamLeaderEmail || '',
+        member1Mobile: participant.member1Mobile || '',
+        member2Mobile: participant.member2Mobile || '',
+        selectedEvents: participant.selectedEvents || registeredEvents.join(', '),
+        registeredEvents,
         scannedEvent: assignedEvent,
+        event: assignedEvent,
         coordinatorName: coordName,
-        coordinatorAssignedEvent: assignedEvent,
+        scannedAt: new Date().toISOString(),
       });
 
       if (gasResult) {
         if (gasResult.result === 'ALREADY_MARKED' || (gasResult.success === false && gasResult.error === 'ALREADY_MARKED')) {
           logScan(uniqueId, participantName, coordName, assignedEvent, assignedEvent, 'ALREADY_MARKED', 'Duplicate detected by Attendance API');
           releaseLock();
-          return res.json(gasResult);
+          return res.json({
+            ...gasResult,
+            participant,
+            scannedEvent: assignedEvent,
+            coordinatorName: coordName,
+          });
         }
         if (gasResult.success) {
           gasAttendanceSuccess = true;
@@ -1043,15 +1121,26 @@ app.post('/api/attendance/mark', async (req, res) => {
       timestamp: now.toISOString(),
       uniqueId,
       participantName,
-      universityRegNumber: participant.universityRegistrationNumber || participant.universityRegNumber || participant.regNumber || '',
+      universityRegNumber:
+        participant.registrationNo ||
+        participant.universityRegistrationNumber ||
+        participant.regNumber ||
+        '',
       email: participant.email || '',
-      mobileNumber: participant.mobileNumber || participant.mobile || '',
-      collegeName: participant.collegeName || participant.college || '',
+      mobileNumber: participant.mobile || participant.mobileNumber || '',
+      collegeName: participant.college || participant.collegeName || '',
       fieldOfStudy: participant.fieldOfStudy || '',
       department: participant.department || '',
       teamName: participant.teamName || '',
       leaderName: participant.leaderName || '',
-      membersName: participant.membersName || '',
+      membersName: participant.members || participant.membersName || '',
+      degree: participant.degree || '',
+      year: participant.year || '',
+      collegeLocation: participant.collegeLocation || '',
+      teamLeaderEmail: participant.teamLeaderEmail || '',
+      member1Mobile: participant.member1Mobile || '',
+      member2Mobile: participant.member2Mobile || '',
+      selectedEvents: participant.selectedEvents || registeredEvents.join(', '),
       registeredEvents,
       scannedEvent: assignedEvent,
       coordinatorName: coordName,
@@ -1066,10 +1155,10 @@ app.post('/api/attendance/mark', async (req, res) => {
     // Check if ALL registered events for this participant have now been attended
     const attendedForParticipant = db.attendance
       .filter((a) => a.uniqueId.toLowerCase() === uniqueId.toLowerCase() && a.attendanceStatus === 'PRESENT')
-      .map((a) => a.scannedEvent.toLowerCase());
+      .map((a) => a.scannedEvent);
 
-    const allCompleted = registeredEvents.every((ev) =>
-      attendedForParticipant.includes(ev.trim().toLowerCase())
+    const allCompleted = registeredEvents.length > 0 && registeredEvents.every((ev) =>
+      isParticipantRegisteredForEvent(attendedForParticipant, ev)
     );
 
     releaseLock();
@@ -1077,7 +1166,7 @@ app.post('/api/attendance/mark', async (req, res) => {
     res.json({
       success: true,
       result: 'SUCCESS',
-      message: 'ATTENDANCE MARKED',
+      message: 'ATTENDANCE MARKED SUCCESSFULLY',
       participant,
       scannedEvent: assignedEvent,
       coordinatorName: coordName,
@@ -1090,7 +1179,7 @@ app.post('/api/attendance/mark', async (req, res) => {
   } catch (err: any) {
     releaseLock();
     logScan(uniqueId, participantName, coordName, assignedEvent, assignedEvent, 'ERROR', err.message);
-    res.status(500).json({ success: false, result: 'ERROR', message: err.message });
+    res.status(500).json({ success: false, result: 'ERROR', message: err.message, participant });
   }
 });
 
