@@ -52,7 +52,7 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
   };
 
   const handlePrefillInitialAdmin = () => {
-    setAccessKey('aegis-syntronix-2026-key');
+    setAccessKey('Aegis.CEO@03');
     setAdminName('Sakthinathan');
     setPassword('Aegis.CEO@03');
     setError(null);
@@ -110,13 +110,13 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
                   id="input-admin-access-key"
                   value={accessKey}
                   onChange={(e) => setAccessKey(e.target.value)}
-                  placeholder="Enter system master access key"
+                  placeholder="Aegis.CEO@03"
                   className="w-full pl-10 pr-3 py-2.5 rounded-xl bg-white/5 border border-white/10 focus:border-[#F27D26] focus:outline-none text-sm text-white placeholder-white/30 font-mono"
                   autoComplete="off"
                 />
               </div>
               <p className="text-[10px] text-white/40 mt-1 font-mono">
-                Project owner key configured server-side
+                Master access key (Default: Aegis.CEO@03)
               </p>
             </div>
 

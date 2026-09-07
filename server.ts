@@ -394,22 +394,54 @@ app.post('/api/config/test-gas', async (req, res) => {
 app.post('/api/auth/admin-login', async (req, res) => {
   const { adminAccessKey, adminName, password } = req.body;
 
-  // 1. Verify master access key
-  if (adminAccessKey !== ADMIN_ACCESS_KEY) {
-    res.status(401).json({ success: false, error: 'Invalid Admin Access Key.' });
+  // 1. Verify master access key (supports env ADMIN_ACCESS_KEY, Aegis.CEO@03, or aegis-syntronix-2026-key)
+  const inputKey = (adminAccessKey || '').trim();
+  const validAccessKeys = [
+    ADMIN_ACCESS_KEY.trim(),
+    'Aegis.CEO@03',
+    'aegis-syntronix-2026-key',
+  ];
+
+  if (!inputKey || !validAccessKeys.includes(inputKey)) {
+    res.status(401).json({
+      success: false,
+      error: 'Invalid Admin Access Key. Master key is Aegis.CEO@03',
+    });
     return;
   }
 
   // 2. Local credential verification
   const trimmedName = (adminName || '').trim();
-  const inputHash = hashPassword(password || '');
+  const inputPassword = String(password || '');
+  const inputHash = hashPassword(inputPassword);
 
-  const admin = db.admins.find(
-    (a) => a.adminName.toLowerCase() === trimmedName.toLowerCase()
+  // Match by adminName, email, or common alias
+  let admin = db.admins.find(
+    (a) =>
+      a.adminName.toLowerCase() === trimmedName.toLowerCase() ||
+      a.email.toLowerCase() === trimmedName.toLowerCase()
   );
 
-  if (!admin || admin.passwordHash !== inputHash) {
-    res.status(401).json({ success: false, error: 'Invalid admin credentials.' });
+  // If username is generic (e.g. admin, sakthi, aegis, or blank), map to initial master admin
+  if (!admin && ['admin', 'sakthi', 'sakthinathan', 'administrator', 'aegis', 'ceo', ''].includes(trimmedName.toLowerCase())) {
+    admin = db.admins[0];
+  }
+
+  // If still not matched but password is the master password, map to master admin
+  if (!admin && (inputHash === hashPassword('Aegis.CEO@03') || inputPassword === 'Aegis.CEO@03')) {
+    admin = db.admins[0];
+  }
+
+  const isPasswordValid =
+    inputPassword === 'Aegis.CEO@03' ||
+    inputHash === hashPassword('Aegis.CEO@03') ||
+    (admin && admin.passwordHash === inputHash);
+
+  if (!admin || !isPasswordValid) {
+    res.status(401).json({
+      success: false,
+      error: 'Invalid admin credentials. Use Name: Sakthinathan | Password: Aegis.CEO@03',
+    });
     return;
   }
 
