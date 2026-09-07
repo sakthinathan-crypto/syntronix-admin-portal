@@ -1324,6 +1324,8 @@ app.get('/api/reset-logs', (req, res) => {
 // ---------------------------------------------------------------------------
 // VITE MIDDLEWARE & SERVER STARTUP
 // ---------------------------------------------------------------------------
+export default app;
+
 async function startServer() {
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
@@ -1344,4 +1346,8 @@ async function startServer() {
   });
 }
 
-startServer();
+// Only launch standalone listener when not in Vercel Serverless environment
+if (!process.env.VERCEL) {
+  startServer();
+}
+
