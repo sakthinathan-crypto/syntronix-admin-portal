@@ -1,1 +1,58 @@
 @import "tailwindcss";
+
+/* Modern Edge-to-Edge QR Camera Viewfinder */
+#syntronix-qr-reader {
+  width: 100% !important;
+  height: 100% !important;
+  border: none !important;
+  background: #000 !important;
+  position: relative !important;
+  overflow: hidden !important;
+}
+
+#syntronix-qr-reader video {
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: cover !important;
+  border-radius: 1rem !important;
+  display: block !important;
+}
+
+#syntronix-qr-reader canvas {
+  border-radius: 1rem !important;
+}
+
+#syntronix-qr-reader img {
+  display: none !important;
+}
+
+#syntronix-qr-reader__scan_region {
+  min-height: 100% !important;
+  height: 100% !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+}
+
+#syntronix-qr-reader__dashboard_section {
+  display: none !important;
+}
+
+@keyframes scan-laser {
+  0% {
+    top: 5%;
+    opacity: 0.8;
+  }
+  50% {
+    top: 92%;
+    opacity: 1;
+  }
+  100% {
+    top: 5%;
+    opacity: 0.8;
+  }
+}
+
+.animate-scan-laser {
+  animation: scan-laser 2.2s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}

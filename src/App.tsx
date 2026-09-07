@@ -72,6 +72,7 @@ export default function App() {
 
     try {
       setIsProcessingScan(true);
+      setIsScannerOpen(false);
       const res = await scanParticipantQR(participant, assignedEvent, coordinatorName);
       setScanResult(res);
       setIsResultOpen(true);
@@ -83,6 +84,7 @@ export default function App() {
         scannedEvent: assignedEvent,
         coordinatorName,
       });
+      setIsScannerOpen(false);
       setIsResultOpen(true);
     } finally {
       setIsProcessingScan(false);

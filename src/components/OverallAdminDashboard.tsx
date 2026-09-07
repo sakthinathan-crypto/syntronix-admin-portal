@@ -19,6 +19,7 @@ import {
   CheckCircle2,
   XCircle,
   Award,
+  Trash2,
 } from 'lucide-react';
 import {
   AdminStats,
@@ -36,6 +37,7 @@ import {
   getCoordinators,
   getScanLogs,
   getResetLogs,
+  deleteCoordinator,
 } from '../services/api';
 import { EventManagementModal } from './EventManagementModal';
 import { ResetAttendanceModal } from './ResetAttendanceModal';
@@ -74,6 +76,31 @@ export const OverallAdminDashboard: React.FC<OverallAdminDashboardProps> = ({
   // Attendance search & filter
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedFilterEvent, setSelectedFilterEvent] = useState('ALL');
+
+  // Coordinator Delete States
+  const [coordinatorToDelete, setCoordinatorToDelete] = useState<CoordinatorUser | null>(null);
+  const [deletingCoord, setDeletingCoord] = useState(false);
+  const [deleteSuccessMessage, setDeleteSuccessMessage] = useState<string | null>(null);
+  const [deleteErrorMessage, setDeleteErrorMessage] = useState<string | null>(null);
+
+  const handleConfirmDeleteCoordinator = async () => {
+    if (!coordinatorToDelete) return;
+    try {
+      setDeletingCoord(true);
+      setDeleteErrorMessage(null);
+      const res = await deleteCoordinator(coordinatorToDelete.email, coordinatorToDelete.coordinatorId);
+      setDeleteSuccessMessage(res.message || 'Coordinator deleted successfully.');
+      setCoordinatorToDelete(null);
+      await loadAllData();
+      setTimeout(() => {
+        setDeleteSuccessMessage(null);
+      }, 5000);
+    } catch (err: any) {
+      setDeleteErrorMessage(err.message || 'Failed to delete coordinator');
+    } finally {
+      setDeletingCoord(false);
+    }
+  };
 
   const loadAllData = async () => {
     try {
@@ -669,6 +696,21 @@ export const OverallAdminDashboard: React.FC<OverallAdminDashboardProps> = ({
             </div>
           </div>
 
+          {deleteSuccessMessage && (
+            <div className="p-3.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-xs font-mono text-emerald-400 flex items-center justify-between animate-in fade-in duration-200">
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                <span>{deleteSuccessMessage}</span>
+              </div>
+              <button
+                onClick={() => setDeleteSuccessMessage(null)}
+                className="text-white/40 hover:text-white"
+              >
+                <XCircle className="w-4 h-4" />
+              </button>
+            </div>
+          )}
+
           <div className="overflow-x-auto rounded-xl border border-white/10">
             <table className="w-full text-left text-xs">
               <thead className="bg-white/5 text-white/40 font-mono uppercase text-[10px] border-b border-white/10">
@@ -678,6 +720,7 @@ export const OverallAdminDashboard: React.FC<OverallAdminDashboardProps> = ({
                   <th className="py-3 px-4">Email</th>
                   <th className="py-3 px-4">Assigned Event</th>
                   <th className="py-3 px-4">Status</th>
+                  <th className="py-3 px-4 text-right">Action</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-white/5 font-mono">
@@ -700,11 +743,113 @@ export const OverallAdminDashboard: React.FC<OverallAdminDashboardProps> = ({
                         {c.status}
                       </span>
                     </td>
+                    <td className="py-3 px-4 text-right">
+                      <button
+                        type="button"
+                        id={`btn-delete-${c.coordinatorId}`}
+                        onClick={() => {
+                          setDeleteErrorMessage(null);
+                          setCoordinatorToDelete(c);
+                        }}
+                        className="px-3 py-1.5 rounded-lg font-mono text-[11px] font-bold text-red-400 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 hover:border-red-500/40 transition-colors inline-flex items-center gap-1.5"
+                        title={`Delete ${c.coordinatorName}`}
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        <span>DELETE</span>
+                      </button>
+                    </td>
                   </tr>
                 ))}
+                {coordinators.length === 0 && (
+                  <tr>
+                    <td colSpan={6} className="py-8 text-center text-white/40 font-mono">
+                      No coordinators found in roster.
+                    </td>
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>
+
+          {/* Delete Coordinator Confirmation Dialog */}
+          {coordinatorToDelete && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-in fade-in duration-150">
+              <div className="relative w-full max-w-md bg-[#0A0A0A] border border-white/10 rounded-2xl p-6 shadow-2xl space-y-4">
+                <div className="flex items-start gap-3.5">
+                  <div className="w-10 h-10 rounded-xl bg-red-500/10 border border-red-500/20 flex items-center justify-center text-red-400 shrink-0">
+                    <AlertTriangle className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h4 className="text-base font-bold text-white font-['Space_Grotesk']">
+                      Delete Coordinator
+                    </h4>
+                    <p className="text-xs text-white/60 mt-0.5">
+                      Are you sure you want to delete this coordinator?
+                    </p>
+                  </div>
+                </div>
+
+                <div className="p-3.5 rounded-xl bg-white/5 border border-white/10 space-y-1.5 text-xs font-mono">
+                  <div className="flex justify-between">
+                    <span className="text-white/40">Name:</span>
+                    <span className="text-white font-semibold">{coordinatorToDelete.coordinatorName}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-white/40">Email:</span>
+                    <span className="text-white/80">{coordinatorToDelete.email}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-white/40">Event:</span>
+                    <span className="text-[#F27D26] font-semibold">{coordinatorToDelete.assignedEvent}</span>
+                  </div>
+                </div>
+
+                <p className="text-[11px] text-white/40 font-mono leading-relaxed">
+                  This action will delete the coordinator record from the Coordinator Database Google Sheet and permanently revoke login access.
+                </p>
+
+                {deleteErrorMessage && (
+                  <div className="p-2.5 rounded-xl bg-red-500/10 border border-red-500/20 text-xs text-red-400 font-mono flex items-center gap-2">
+                    <AlertTriangle className="w-4 h-4 shrink-0" />
+                    <span>{deleteErrorMessage}</span>
+                  </div>
+                )}
+
+                <div className="flex items-center justify-end gap-3 pt-2">
+                  <button
+                    type="button"
+                    disabled={deletingCoord}
+                    onClick={() => {
+                      setCoordinatorToDelete(null);
+                      setDeleteErrorMessage(null);
+                    }}
+                    className="px-4 py-2 rounded-xl text-xs font-mono text-white/60 hover:text-white transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    id="btn-confirm-delete-coordinator"
+                    disabled={deletingCoord}
+                    onClick={handleConfirmDeleteCoordinator}
+                    className="px-5 py-2 rounded-xl font-mono text-xs font-bold text-white bg-red-600 hover:bg-red-500 shadow-lg shadow-red-600/20 active:scale-95 transition-all flex items-center gap-1.5"
+                  >
+                    {deletingCoord ? (
+                      <>
+                        <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                        <span>Deleting...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Trash2 className="w-3.5 h-3.5" />
+                        <span>CONFIRM DELETE</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

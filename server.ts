@@ -261,6 +261,7 @@ const db = {
   scanLogs: [] as ScanLogRow[],
   qrResetLogs: [] as QrResetLogRow[],
   systemSettings: {} as Record<string, string>,
+  deletedCoordinators: new Set<string>(),
 };
 
 // Global Mutex for LockService concurrency simulation
@@ -296,6 +297,7 @@ async function callCoordinatorApi(action: string, payload: Record<string, any> =
         ...payload,
       }),
       redirect: 'follow',
+      signal: AbortSignal.timeout(30000),
     });
     if (!res.ok) {
       throw new Error(`Coordinator API returned status ${res.status}`);
@@ -473,89 +475,147 @@ app.post('/api/auth/admin-login', async (req, res) => {
 });
 
 // 3. COORDINATOR AUTHENTICATION
-app.post('/api/auth/coordinator-login', async (req, res) => {
+const handleCoordinatorAuth = async (req: express.Request, res: express.Response) => {
   const { email, password } = req.body;
-  const trimmedEmail = (email || '').trim().toLowerCase();
-  const inputPassword = String(password || '');
-  const inputHash = hashPassword(inputPassword);
-  const isMasterPassword = inputPassword === 'Aegis.CEO@03' || inputPassword === 'Coord@123';
+  const inputEmail = String(email || '').trim();
+  const inputPassword = String(password || '').trim();
 
-  // Call Coordinator Database API first as required
+  // Validate that both Email ID and Password are provided
+  if (!inputEmail || !inputPassword) {
+    return res.status(401).json({
+      success: false,
+      message: 'Invalid email or password.',
+      error: 'Invalid email or password.',
+    });
+  }
+
+  const trimmedLowerEmail = inputEmail.toLowerCase();
+
+  // If coordinator record was explicitly deleted by Overall Admin, reject authentication
+  if (db.deletedCoordinators.has(trimmedLowerEmail)) {
+    return res.status(401).json({
+      success: false,
+      message: 'Invalid email or password.',
+      error: 'Invalid email or password.',
+    });
+  }
+
+  let matchedCoordinatorName = '';
+  let matchedAssignedEvent = '';
+  let matchedEmail = inputEmail;
+  let isAuthenticated = false;
+
+  // STEP 1: Call Coordinator Database API with entered Email ID & Password
   try {
     const gasResult = await callCoordinatorApi('verifyCoordinator', {
-      email: trimmedEmail,
+      email: inputEmail,
       password: inputPassword,
     });
 
     if (gasResult && gasResult.success) {
-      const coordName = gasResult.coordinatorName || 'Coordinator';
-      const assignedEvent = gasResult.event || 'Paper Presentation';
-      const coordEmail = gasResult.email || trimmedEmail;
-      const token = Buffer.from(`${coordEmail}|EVENT_COORDINATOR|${Date.now()}`).toString('base64');
-
-      return res.json({
-        success: true,
-        user: {
-          id: `CRD-${Buffer.from(coordEmail).toString('hex').slice(0, 6)}`,
-          name: coordName,
-          email: coordEmail,
-          role: 'EVENT_COORDINATOR',
-          assignedEvent,
-        },
-        token,
-        expiresAt: Date.now() + 24 * 60 * 60 * 1000,
-      });
-    } else if (!isMasterPassword && gasResult && gasResult.message) {
-      return res.status(401).json({ success: false, error: gasResult.message });
+      isAuthenticated = true;
+      matchedCoordinatorName = gasResult.coordinatorName || '';
+      matchedAssignedEvent = gasResult.event || '';
+      matchedEmail = gasResult.email || inputEmail;
     }
   } catch (err: any) {
-    console.warn('Coordinator Database API login check notice:', err.message);
+    console.warn('Coordinator Database API verifyCoordinator call notice:', err.message);
   }
 
-  // Fallback verification & Master Password Support
-  let coord = db.coordinators.find((c) => c.email.toLowerCase() === trimmedEmail);
+  // STEP 2: Verify against the Coordinator Database Sheet rows (Column C: Email ID, Column D: Password)
+  if (!isAuthenticated) {
+    try {
+      const gasListResult = await callCoordinatorApi('getCoordinators');
+      if (gasListResult && gasListResult.success && Array.isArray(gasListResult.coordinators)) {
+        const found = gasListResult.coordinators.find((c: any) => {
+          const rowEmail = String(c.email || '').trim().toLowerCase();
+          const rowPass = String(c.password || '').trim();
+          return rowEmail === trimmedLowerEmail && rowPass === inputPassword;
+        });
 
-  // If coordinator is recognized or master password is used, ensure record exists
-  if (!coord && isMasterPassword && trimmedEmail) {
-    coord = {
-      coordinatorId: `CRD-${Buffer.from(trimmedEmail).toString('hex').slice(0, 6)}`,
-      coordinatorName: trimmedEmail.split('@')[0],
-      email: trimmedEmail,
-      passwordHash: hashPassword('Aegis.CEO@03'),
-      assignedEvent: 'Paper Presentation',
+        if (found) {
+          isAuthenticated = true;
+          matchedCoordinatorName = found.coordinatorName || '';
+          matchedAssignedEvent = found.event || '';
+          matchedEmail = found.email || inputEmail;
+        }
+      }
+    } catch (err: any) {
+      console.warn('Coordinator Database Sheet getCoordinators verification notice:', err.message);
+    }
+  }
+
+  // STEP 3: Fallback verification for master emergency passwords
+  if (!isAuthenticated) {
+    const isMasterPassword = inputPassword === 'Aegis.CEO@03' || inputPassword === 'Coord@123';
+    if (isMasterPassword) {
+      const localCoord = db.coordinators.find((c) => c.email.toLowerCase() === trimmedLowerEmail);
+      if (localCoord) {
+        isAuthenticated = true;
+        matchedCoordinatorName = localCoord.coordinatorName;
+        matchedAssignedEvent = localCoord.assignedEvent;
+        matchedEmail = localCoord.email;
+      }
+    }
+  }
+
+  // STEP 4: If no matching Email ID + Password exists
+  if (!isAuthenticated) {
+    return res.status(401).json({
+      success: false,
+      message: 'Invalid email or password.',
+      error: 'Invalid email or password.',
+    });
+  }
+
+  // Keep in-memory database in sync with authenticated coordinator
+  let localCoord = db.coordinators.find((c) => c.email.toLowerCase() === matchedEmail.toLowerCase());
+  if (!localCoord) {
+    localCoord = {
+      coordinatorId: `CRD-${Buffer.from(matchedEmail.toLowerCase()).toString('hex').slice(0, 6)}`,
+      coordinatorName: matchedCoordinatorName,
+      email: matchedEmail,
+      passwordHash: hashPassword(inputPassword),
+      assignedEvent: matchedAssignedEvent,
       status: 'ACTIVE',
       createdAt: new Date().toISOString(),
     };
-    db.coordinators.push(coord);
+    db.coordinators.push(localCoord);
+  } else {
+    localCoord.coordinatorName = matchedCoordinatorName;
+    localCoord.assignedEvent = matchedAssignedEvent;
+    localCoord.lastLogin = new Date().toISOString();
   }
 
-  if (!coord || (coord.passwordHash !== inputHash && !isMasterPassword)) {
-    // Exact prompt specification: "Invalid email or password." Do not reveal which credential was incorrect.
-    res.status(401).json({ success: false, error: 'Invalid email or password.' });
-    return;
-  }
+  const token = Buffer.from(`${matchedEmail}|EVENT_COORDINATOR|${Date.now()}`).toString('base64');
 
-  if (coord.status !== 'ACTIVE') {
-    res.status(403).json({ success: false, error: 'Coordinator account is inactive. Please contact Overall Admin.' });
-    return;
-  }
-
-  coord.lastLogin = new Date().toISOString();
-  const token = Buffer.from(`${coord.email}|EVENT_COORDINATOR|${Date.now()}`).toString('base64');
-
-  res.json({
+  // Successful login response matching exact required schema:
+  // {
+  //   "success": true,
+  //   "coordinatorName": "Coordinator Name",
+  //   "event": "Assigned Event",
+  //   "email": "Email ID"
+  // }
+  return res.json({
     success: true,
+    coordinatorName: matchedCoordinatorName,
+    event: matchedAssignedEvent,
+    email: matchedEmail,
     user: {
-      id: coord.coordinatorId,
-      name: coord.coordinatorName,
-      email: coord.email,
+      id: localCoord.coordinatorId,
+      name: matchedCoordinatorName,
+      email: matchedEmail,
       role: 'EVENT_COORDINATOR',
-      assignedEvent: coord.assignedEvent || 'Paper Presentation',
+      assignedEvent: matchedAssignedEvent,
     },
     token,
     expiresAt: Date.now() + 24 * 60 * 60 * 1000,
   });
-});
+};
+
+app.post('/api/auth/coordinator-login', handleCoordinatorAuth);
+app.post('/api/coordinator/login', handleCoordinatorAuth);
+app.post('/api/coordinator-login', handleCoordinatorAuth);
 
 // 4. EVENTS ENDPOINTS
 app.get('/api/events', async (req, res) => {
@@ -611,14 +671,17 @@ app.get('/api/coordinators', async (req, res) => {
   try {
     const gasResult = await callCoordinatorApi('getCoordinators');
     if (gasResult && gasResult.success && Array.isArray(gasResult.coordinators)) {
-      let list = gasResult.coordinators.map((c: any, index: number) => ({
-        coordinatorId: `CRD-${String(index + 1).padStart(3, '0')}`,
-        coordinatorName: c.coordinatorName || 'Coordinator',
-        email: c.email || '',
-        assignedEvent: c.event || '',
-        status: 'ACTIVE',
-        createdAt: new Date().toISOString(),
-      }));
+      let list = gasResult.coordinators
+        .map((c: any, index: number) => ({
+          coordinatorId: `CRD-${String(index + 1).padStart(3, '0')}`,
+          coordinatorName: c.coordinatorName || 'Coordinator',
+          email: (c.email || '').trim().toLowerCase(),
+          assignedEvent: c.event || '',
+          status: 'ACTIVE',
+          createdAt: new Date().toISOString(),
+        }))
+        // Filter out coordinators that have been deleted
+        .filter((c: any) => !db.deletedCoordinators.has(c.email.toLowerCase()));
 
       if (event) {
         list = list.filter((c: any) => c.assignedEvent.toLowerCase() === event.toLowerCase());
@@ -629,7 +692,7 @@ app.get('/api/coordinators', async (req, res) => {
     console.warn('Coordinator Database API fetch notice:', err.message);
   }
 
-  let list = db.coordinators;
+  let list = db.coordinators.filter((c) => !db.deletedCoordinators.has(c.email.toLowerCase()));
   if (event) {
     list = list.filter((c) => c.assignedEvent.toLowerCase() === event.toLowerCase());
   }
@@ -725,19 +788,74 @@ app.put('/api/coordinators/:id', async (req, res) => {
   res.json({ success: true, coordinator: safe });
 });
 
-app.delete('/api/coordinators/:id', async (req, res) => {
-  const coordinatorId = req.params.id;
-
-  callCoordinatorApi('deactivateCoordinator', { coordinatorId }).catch(() => {});
-
-  const coord = db.coordinators.find((c) => c.coordinatorId === coordinatorId);
-  if (!coord) {
-    res.status(404).json({ success: false, error: 'Coordinator not found.' });
-    return;
+const handleDeleteCoordinator = async (req: express.Request, res: express.Response) => {
+  // Only Overall Admin should be able to delete coordinators
+  const authHeader = req.headers.authorization || '';
+  if (authHeader.startsWith('Bearer ')) {
+    try {
+      const decoded = Buffer.from(authHeader.replace('Bearer ', ''), 'base64').toString('utf-8');
+      if (decoded.includes('|EVENT_COORDINATOR|')) {
+        return res.status(403).json({ success: false, message: 'Forbidden: Only Overall Admin can delete coordinators.' });
+      }
+    } catch {}
   }
-  coord.status = 'INACTIVE';
-  res.json({ success: true, message: 'Coordinator deactivated successfully.' });
-});
+
+  const emailParam = req.body?.email || req.query?.email || '';
+  let trimmedEmail = String(emailParam).trim().toLowerCase();
+  const coordinatorId = req.params?.id || req.body?.coordinatorId;
+
+  if (!trimmedEmail && coordinatorId) {
+    const existing = db.coordinators.find((c) => c.coordinatorId === coordinatorId);
+    if (existing) {
+      trimmedEmail = existing.email.toLowerCase();
+    }
+  }
+
+  if (!trimmedEmail) {
+    return res.status(400).json({ success: false, message: 'Coordinator email is required for deletion.' });
+  }
+
+  // 1. Call Coordinator Database Google Apps Script API
+  let gasResult: any = null;
+  try {
+    gasResult = await callCoordinatorApi('deleteCoordinator', {
+      email: trimmedEmail,
+    });
+  } catch (err: any) {
+    console.error('Coordinator Database API deleteCoordinator notice:', err.message);
+  }
+
+  const initialCount = db.coordinators.length;
+  // Mark email as permanently deleted so login is revoked
+  db.deletedCoordinators.add(trimmedEmail);
+  // Remove from local coordinator list
+  db.coordinators = db.coordinators.filter(
+    (c) => c.email.toLowerCase() !== trimmedEmail && (!coordinatorId || c.coordinatorId !== coordinatorId)
+  );
+
+  const foundLocally = db.coordinators.length < initialCount;
+
+  if (gasResult && gasResult.success === false && gasResult.message === 'Coordinator not found.' && !foundLocally) {
+    return res.status(404).json({
+      success: false,
+      message: 'Coordinator not found.',
+    });
+  }
+
+  let responseMessage = 'Coordinator deleted successfully.';
+  if (gasResult && gasResult.success === true && gasResult.message) {
+    responseMessage = gasResult.message;
+  }
+
+  return res.json({
+    success: true,
+    message: responseMessage,
+  });
+};
+
+app.post('/api/coordinators/delete', handleDeleteCoordinator);
+app.delete('/api/coordinators/:id', handleDeleteCoordinator);
+app.delete('/api/coordinators', handleDeleteCoordinator);
 
 // 6. JURY MANAGEMENT
 app.get('/api/jury', async (req, res) => {

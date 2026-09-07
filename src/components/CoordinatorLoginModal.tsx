@@ -47,12 +47,6 @@ export const CoordinatorLoginModal: React.FC<CoordinatorLoginModalProps> = ({
     }
   };
 
-  const handleSelectQuickCoordinator = (coordEmail: string, coordPass = 'Aegis.CEO@03') => {
-    setEmail(coordEmail);
-    setPassword(coordPass);
-    setError(null);
-  };
-
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-in fade-in duration-200">
       <div className="relative w-full max-w-md bg-[#0A0A0A] border border-white/10 rounded-2xl shadow-2xl overflow-hidden">
@@ -102,6 +96,7 @@ export const CoordinatorLoginModal: React.FC<CoordinatorLoginModalProps> = ({
                 <input
                   type="email"
                   id="input-coord-email"
+                  required
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="coordinator@egspec.ac.in"
@@ -121,6 +116,7 @@ export const CoordinatorLoginModal: React.FC<CoordinatorLoginModalProps> = ({
                 <input
                   type={showPassword ? 'text' : 'password'}
                   id="input-coord-password"
+                  required
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••••••••"
@@ -154,56 +150,6 @@ export const CoordinatorLoginModal: React.FC<CoordinatorLoginModalProps> = ({
               </button>
             </div>
           </form>
-
-          {/* Initial Pre-configured Coordinators quick helper */}
-          <div className="mt-5 pt-4 border-t border-white/5">
-            <div className="text-[11px] text-white/40 font-mono mb-2 flex items-center gap-1">
-              <Sparkles className="w-3 h-3 text-[#F27D26]" />
-              <span>Initial Coordinators (Quick select):</span>
-            </div>
-            <div className="space-y-1.5">
-              <button
-                type="button"
-                onClick={() => handleSelectQuickCoordinator('sakthi@syntronix26.egspec.ac.in', 'Aegis.CEO@03')}
-                className="w-full text-left text-xs p-2.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 hover:border-[#F27D26]/40 transition-colors flex items-center justify-between"
-              >
-                <span className="text-white font-medium">Sakthi (Organizer)</span>
-                <span className="text-[10px] font-mono text-[#FCD34D]">Paper Presentation</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => handleSelectQuickCoordinator('test@egspec.ac.in', 'Aegis.CEO@03')}
-                className="w-full text-left text-xs p-2.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 hover:border-[#F27D26]/40 transition-colors flex items-center justify-between"
-              >
-                <span className="text-white font-medium">Test Coordinator</span>
-                <span className="text-[10px] font-mono text-[#FCD34D]">Paper Presentation</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => handleSelectQuickCoordinator('pushpa.cse@egspec.ac.in', 'Coord@123')}
-                className="w-full text-left text-xs p-2.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 hover:border-[#F27D26]/40 transition-colors flex items-center justify-between"
-              >
-                <span className="text-white font-medium">Dr. G. Pushpa (AP/CSE)</span>
-                <span className="text-[10px] font-mono text-[#FCD34D]">Paper Presentation</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => handleSelectQuickCoordinator('mohanapriya.cse@egspec.ac.in', 'Coord@123')}
-                className="w-full text-left text-xs p-2.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 hover:border-[#F27D26]/40 transition-colors flex items-center justify-between"
-              >
-                <span className="text-white font-medium">Mrs. L. Mohana Priya (AP/CSE)</span>
-                <span className="text-[10px] font-mono text-[#FCD34D]">Poster Making</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => handleSelectQuickCoordinator('convenor.cse@egspec.ac.in', 'Coord@123')}
-                className="w-full text-left text-xs p-2.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 hover:border-[#F27D26]/40 transition-colors flex items-center justify-between"
-              >
-                <span className="text-white font-medium">Dr. K. Balasubramaniam (Head/CSE)</span>
-                <span className="text-[10px] font-mono text-[#FCD34D]">Paper Presentation</span>
-              </button>
-            </div>
-          </div>
         </div>
       </div>
     </div>

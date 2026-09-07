@@ -106,6 +106,10 @@ function handleRequest(e, method) {
         output = handleDeactivateCoordinator(params);
         break;
 
+      case "deleteCoordinator":
+        output = handleDeleteCoordinator(params);
+        break;
+
       case "getJury":
         output = handleGetJury(params);
         break;
@@ -681,6 +685,40 @@ function handleUpdateCoordinator(params) {
 
 function handleDeactivateCoordinator(params) {
   return handleUpdateCoordinator({ coordinatorId: params.coordinatorId, status: "INACTIVE" });
+}
+
+function handleDeleteCoordinator(params) {
+  var email = (params.email || "").trim().toLowerCase();
+  var coordinatorId = (params.coordinatorId || "").trim();
+
+  if (!email && !coordinatorId) {
+    return { success: false, message: "Coordinator email is required." };
+  }
+
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(SHEETS.COORDINATORS);
+  var data = sheet.getDataRange().getValues();
+  var rowIndex = -1;
+
+  for (var i = 1; i < data.length; i++) {
+    var rowCoordId = String(data[i][0]).trim();
+    var rowEmail = String(data[i][2]).trim().toLowerCase();
+    if ((email && rowEmail === email) || (coordinatorId && rowCoordId === coordinatorId)) {
+      rowIndex = i + 1; // 1-indexed row in sheet
+      break;
+    }
+  }
+
+  if (rowIndex === -1) {
+    return { success: false, message: "Coordinator not found." };
+  }
+
+  sheet.deleteRow(rowIndex);
+
+  return {
+    success: true,
+    message: "Coordinator deleted successfully."
+  };
 }
 
 // ---------------------------------------------------------------------------

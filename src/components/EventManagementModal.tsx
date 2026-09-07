@@ -24,6 +24,7 @@ import {
 import {
   getCoordinators,
   addCoordinator,
+  deleteCoordinator,
   deactivateCoordinator,
   getJury,
   addJury,
@@ -141,6 +142,18 @@ export const EventManagementModal: React.FC<EventManagementModalProps> = ({
       loadEventData();
     } catch (err: any) {
       setCoordError(err.message || 'Failed to add coordinator');
+    }
+  };
+
+  const handleDeleteCoordinator = async (coord: CoordinatorUser) => {
+    if (!confirm('Are you sure you want to delete this coordinator?')) return;
+    try {
+      const res = await deleteCoordinator(coord.email, coord.coordinatorId);
+      alert(res.message || 'Coordinator deleted successfully.');
+      loadEventData();
+      onEventUpdated();
+    } catch (err: any) {
+      alert('Error deleting coordinator: ' + err.message);
     }
   };
 
@@ -508,15 +521,15 @@ export const EventManagementModal: React.FC<EventManagementModalProps> = ({
                           </span>
                         </td>
                         <td className="py-3 px-4 text-right">
-                          {c.status === 'ACTIVE' && (
-                            <button
-                              onClick={() => handleDeactivateCoordinator(c.coordinatorId)}
-                              className="text-white/40 hover:text-red-400 text-xs font-mono transition-colors"
-                              title="Deactivate Coordinator"
-                            >
-                              Deactivate
-                            </button>
-                          )}
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteCoordinator(c)}
+                            className="px-2.5 py-1 rounded-lg font-mono text-[11px] font-bold text-red-400 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 hover:border-red-500/40 transition-colors inline-flex items-center gap-1"
+                            title="Delete Coordinator"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                            <span>DELETE</span>
+                          </button>
                         </td>
                       </tr>
                     ))}

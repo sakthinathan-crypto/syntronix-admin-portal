@@ -52,18 +52,29 @@ export async function coordinatorLogin(
   const res = await fetch(`${API_BASE}/auth/coordinator-login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, password }),
+    body: JSON.stringify({ email: email.trim(), password: password.trim() }),
   });
 
   const data = await res.json();
   if (!res.ok || !data.success) {
-    throw new Error(data.error || 'Invalid email or password.');
+    throw new Error(data.message || data.error || 'Invalid email or password.');
   }
 
+  // Use the returned coordinatorName, event, and email to populate session & dashboard
+  const coordinatorName = data.coordinatorName || (data.user && data.user.name) || 'Coordinator';
+  const assignedEvent = data.event || (data.user && data.user.assignedEvent) || '';
+  const coordEmail = data.email || (data.user && data.user.email) || email.trim();
+
   const session: AuthSession = {
-    user: data.user,
-    token: data.token,
-    expiresAt: data.expiresAt,
+    user: {
+      id: (data.user && data.user.id) || `CRD-${Math.random().toString(36).slice(2, 8)}`,
+      name: coordinatorName,
+      email: coordEmail,
+      role: 'EVENT_COORDINATOR',
+      assignedEvent: assignedEvent,
+    },
+    token: data.token || (typeof btoa !== 'undefined' ? btoa(`${coordEmail}|EVENT_COORDINATOR|${Date.now()}`) : 'token'),
+    expiresAt: data.expiresAt || (Date.now() + 24 * 60 * 60 * 1000),
   };
   setStoredSession(session);
   return session;
@@ -145,9 +156,33 @@ export async function updateCoordinator(
   return data.coordinator;
 }
 
+export async function deleteCoordinator(
+  email: string,
+  coordinatorId?: string
+): Promise<{ success: boolean; message: string }> {
+  const token = localStorage.getItem('syntronix_auth_token');
+  const res = await fetch(`${API_BASE}/coordinators/delete`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify({ email, coordinatorId }),
+  });
+  const data = await res.json();
+  if (!res.ok || !data.success) {
+    throw new Error(data.message || data.error || 'Failed to delete coordinator');
+  }
+  return data;
+}
+
 export async function deactivateCoordinator(coordinatorId: string): Promise<void> {
+  const token = localStorage.getItem('syntronix_auth_token');
   const res = await fetch(`${API_BASE}/coordinators/${coordinatorId}`, {
     method: 'DELETE',
+    headers: {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
   });
   const data = await res.json();
   if (!res.ok || !data.success) {

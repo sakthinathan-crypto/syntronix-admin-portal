@@ -10,11 +10,14 @@ export function parseParticipantQR(rawData: string): ParticipantQRData | null {
   if (!rawData || typeof rawData !== 'string') return null;
 
   const trimmed = rawData.trim();
+  if (!trimmed) return null;
 
   // 1. Try Direct JSON Parse
   try {
     const obj = JSON.parse(trimmed);
-    return normalizeParticipantObject(obj);
+    if (obj && typeof obj === 'object') {
+      return normalizeParticipantObject(obj);
+    }
   } catch {
     // Not plain JSON, continue trying alternatives
   }
@@ -23,7 +26,9 @@ export function parseParticipantQR(rawData: string): ParticipantQRData | null {
   try {
     const decoded = atob(trimmed);
     const obj = JSON.parse(decoded);
-    return normalizeParticipantObject(obj);
+    if (obj && typeof obj === 'object') {
+      return normalizeParticipantObject(obj);
+    }
   } catch {
     // Not base64, continue
   }
@@ -32,12 +37,40 @@ export function parseParticipantQR(rawData: string): ParticipantQRData | null {
   try {
     const decoded = decodeURIComponent(trimmed);
     const obj = JSON.parse(decoded);
-    return normalizeParticipantObject(obj);
+    if (obj && typeof obj === 'object') {
+      return normalizeParticipantObject(obj);
+    }
   } catch {
     // Not url encoded JSON
   }
 
-  // 4. Try Key-Value line based format
+  // 4. Try URL or query string format (e.g. https://.../?uniqueId=SYN26-0012&name=...)
+  if (trimmed.startsWith('http://') || trimmed.startsWith('https://') || trimmed.includes('?')) {
+    try {
+      const urlStr = trimmed.startsWith('http') ? trimmed : 'http://portal.local/?' + trimmed;
+      const url = new URL(urlStr);
+      const dict: Record<string, string> = {};
+      url.searchParams.forEach((val, key) => {
+        dict[key] = val;
+      });
+
+      // Check if there is an embedded JSON payload inside a query parameter (e.g. ?data= or ?qr=)
+      for (const paramKey of ['data', 'qr', 'payload', 'json', 'participant', 'p']) {
+        if (dict[paramKey]) {
+          const nested = parseParticipantQR(dict[paramKey]);
+          if (nested) return nested;
+        }
+      }
+
+      if (dict.uniqueId || dict.unique_id || dict.id || dict.participantId || dict.name) {
+        return normalizeParticipantObject(dict);
+      }
+    } catch {
+      // url parse failed
+    }
+  }
+
+  // 5. Try Key-Value line based format
   // Example:
   // Unique ID: SYN26-0001
   // Name: Arun Kumar
@@ -61,6 +94,36 @@ export function parseParticipantQR(rawData: string): ParticipantQRData | null {
     }
   } catch {
     // line parsing failed
+  }
+
+  // 6. Try Pipe or Semicolon or Comma separated values
+  if (trimmed.includes('|') || trimmed.includes(';')) {
+    try {
+      const parts = trimmed.split(/[|;]/).map((p) => p.trim()).filter(Boolean);
+      if (parts.length >= 2) {
+        const idIdx = parts.findIndex((p) => /SYN|EVT|[0-9]{4,}/i.test(p));
+        if (idIdx !== -1) {
+          const uniqueId = parts[idIdx];
+          const remaining = parts.filter((_, i) => i !== idIdx);
+          return normalizeParticipantObject({
+            uniqueId,
+            name: remaining[0] || 'Participant',
+            events: remaining.slice(1),
+          });
+        }
+      }
+    } catch {
+      // delimited parse failed
+    }
+  }
+
+  // 7. Check if the string itself is a direct Unique ID (e.g. SYN26-0012, SYN-001, etc.)
+  const directIdMatch = trimmed.match(/^SYN(?:26)?[-_]?[0-9A-Za-z]+$/i);
+  if (directIdMatch) {
+    return normalizeParticipantObject({
+      uniqueId: directIdMatch[0].toUpperCase(),
+      name: `Participant (${directIdMatch[0].toUpperCase()})`,
+    });
   }
 
   return null;
