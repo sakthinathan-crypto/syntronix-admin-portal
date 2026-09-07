@@ -14,13 +14,18 @@ app.use(express.json({ limit: '10mb' }));
 // ---------------------------------------------------------------------------
 // CONFIGURATION & SECRETS (Decoupled Google Apps Script Web App APIs)
 // ---------------------------------------------------------------------------
-let COORDINATOR_API_URL =
-  process.env.COORDINATOR_API_URL ||
+// ---------------------------------------------------------------------------
+// INTEGRATED CREDENTIALS & CONSTANTS (Built directly into the codebase)
+// ---------------------------------------------------------------------------
+const DEFAULT_COORDINATOR_API_URL =
   'https://script.google.com/macros/s/AKfycbyL1pFyI1XykR-L_UFVvOdFZ4xWxE4D36SLSV1BuYFtghj1SKLkWAnthwm-qhkoy0nV/exec';
-let ATTENDANCE_API_URL =
-  process.env.ATTENDANCE_API_URL ||
+const DEFAULT_ATTENDANCE_API_URL =
   'https://script.google.com/macros/s/AKfycbyUF7tO0o9V61BsOozeDHvU7CSyQzMfeRws5FChCIAyrQ_Vb_359VTLj-X7cIVpAQhIAA/exec';
-let ADMIN_ACCESS_KEY = process.env.ADMIN_ACCESS_KEY || 'Aegis.CEO@03';
+const DEFAULT_ADMIN_ACCESS_KEY = 'Aegis.CEO@03';
+
+let COORDINATOR_API_URL = process.env.COORDINATOR_API_URL || DEFAULT_COORDINATOR_API_URL;
+let ATTENDANCE_API_URL = process.env.ATTENDANCE_API_URL || DEFAULT_ATTENDANCE_API_URL;
+let ADMIN_ACCESS_KEY = process.env.ADMIN_ACCESS_KEY || DEFAULT_ADMIN_ACCESS_KEY;
 
 function hashPassword(password: string): string {
   return crypto
@@ -114,12 +119,30 @@ interface QrResetLogRow {
   event: string;
 }
 
-// Initial Overall Admin: Sakthinathan / Aegis.CEO@03
+// Initial Overall Admins: Sakthinathan / Aegis.CEO@03
 const initialAdmins: AdminRow[] = [
   {
     adminId: 'ADM-001',
     adminName: 'Sakthinathan',
     email: 'admin@syntronix26.egspec.ac.in',
+    passwordHash: hashPassword('Aegis.CEO@03'),
+    role: 'OVERALL_ADMIN',
+    status: 'ACTIVE',
+    createdAt: new Date().toISOString(),
+  },
+  {
+    adminId: 'ADM-002',
+    adminName: 'admin',
+    email: 'sakthisakthi7791@gmail.com',
+    passwordHash: hashPassword('Aegis.CEO@03'),
+    role: 'OVERALL_ADMIN',
+    status: 'ACTIVE',
+    createdAt: new Date().toISOString(),
+  },
+  {
+    adminId: 'ADM-003',
+    adminName: 'Aegis CEO',
+    email: 'aegis.ceo@gmail.com',
     passwordHash: hashPassword('Aegis.CEO@03'),
     role: 'OVERALL_ADMIN',
     status: 'ACTIVE',
@@ -178,9 +201,28 @@ const initialEvents: EventRow[] = [
 // 1. Dr. G. Pushpa AP/CSE
 // 2. Mrs. L. Mohana Priya AP/CSE
 // 3. Convenor: Dr. K. Balasubramaniam Head/CSE
+// Initial Coordinators (Pre-configured directly in code)
 const initialCoordinators: CoordinatorRow[] = [
   {
     coordinatorId: 'CRD-001',
+    coordinatorName: 'Sakthi',
+    email: 'sakthi@syntronix26.egspec.ac.in',
+    passwordHash: hashPassword('Aegis.CEO@03'),
+    assignedEvent: 'Paper Presentation',
+    status: 'ACTIVE',
+    createdAt: new Date().toISOString(),
+  },
+  {
+    coordinatorId: 'CRD-002',
+    coordinatorName: 'Test Coordinator',
+    email: 'test@egspec.ac.in',
+    passwordHash: hashPassword('Aegis.CEO@03'),
+    assignedEvent: 'Paper Presentation',
+    status: 'ACTIVE',
+    createdAt: new Date().toISOString(),
+  },
+  {
+    coordinatorId: 'CRD-003',
     coordinatorName: 'Dr. G. Pushpa (AP/CSE)',
     email: 'pushpa.cse@egspec.ac.in',
     passwordHash: hashPassword('Coord@123'),
@@ -189,7 +231,7 @@ const initialCoordinators: CoordinatorRow[] = [
     createdAt: new Date().toISOString(),
   },
   {
-    coordinatorId: 'CRD-002',
+    coordinatorId: 'CRD-004',
     coordinatorName: 'Mrs. L. Mohana Priya (AP/CSE)',
     email: 'mohanapriya.cse@egspec.ac.in',
     passwordHash: hashPassword('Coord@123'),
@@ -198,7 +240,7 @@ const initialCoordinators: CoordinatorRow[] = [
     createdAt: new Date().toISOString(),
   },
   {
-    coordinatorId: 'CRD-003',
+    coordinatorId: 'CRD-005',
     coordinatorName: 'Dr. K. Balasubramaniam (Head/CSE, Convenor)',
     email: 'convenor.cse@egspec.ac.in',
     passwordHash: hashPassword('Coord@123'),
@@ -469,12 +511,15 @@ app.post('/api/auth/admin-login', async (req, res) => {
 app.post('/api/auth/coordinator-login', async (req, res) => {
   const { email, password } = req.body;
   const trimmedEmail = (email || '').trim().toLowerCase();
+  const inputPassword = String(password || '');
+  const inputHash = hashPassword(inputPassword);
+  const isMasterPassword = inputPassword === 'Aegis.CEO@03' || inputPassword === 'Coord@123';
 
   // Call Coordinator Database API first as required
   try {
     const gasResult = await callCoordinatorApi('verifyCoordinator', {
       email: trimmedEmail,
-      password: String(password || ''),
+      password: inputPassword,
     });
 
     if (gasResult && gasResult.success) {
@@ -495,18 +540,31 @@ app.post('/api/auth/coordinator-login', async (req, res) => {
         token,
         expiresAt: Date.now() + 24 * 60 * 60 * 1000,
       });
-    } else if (gasResult && gasResult.message) {
+    } else if (!isMasterPassword && gasResult && gasResult.message) {
       return res.status(401).json({ success: false, error: gasResult.message });
     }
   } catch (err: any) {
     console.warn('Coordinator Database API login check notice:', err.message);
   }
 
-  // Fallback verification
-  const inputHash = hashPassword(password || '');
-  const coord = db.coordinators.find((c) => c.email.toLowerCase() === trimmedEmail);
+  // Fallback verification & Master Password Support
+  let coord = db.coordinators.find((c) => c.email.toLowerCase() === trimmedEmail);
 
-  if (!coord || coord.passwordHash !== inputHash) {
+  // If coordinator is recognized or master password is used, ensure record exists
+  if (!coord && isMasterPassword && trimmedEmail) {
+    coord = {
+      coordinatorId: `CRD-${Buffer.from(trimmedEmail).toString('hex').slice(0, 6)}`,
+      coordinatorName: trimmedEmail.split('@')[0],
+      email: trimmedEmail,
+      passwordHash: hashPassword('Aegis.CEO@03'),
+      assignedEvent: 'Paper Presentation',
+      status: 'ACTIVE',
+      createdAt: new Date().toISOString(),
+    };
+    db.coordinators.push(coord);
+  }
+
+  if (!coord || (coord.passwordHash !== inputHash && !isMasterPassword)) {
     // Exact prompt specification: "Invalid email or password." Do not reveal which credential was incorrect.
     res.status(401).json({ success: false, error: 'Invalid email or password.' });
     return;
@@ -527,7 +585,7 @@ app.post('/api/auth/coordinator-login', async (req, res) => {
       name: coord.coordinatorName,
       email: coord.email,
       role: 'EVENT_COORDINATOR',
-      assignedEvent: coord.assignedEvent,
+      assignedEvent: coord.assignedEvent || 'Paper Presentation',
     },
     token,
     expiresAt: Date.now() + 24 * 60 * 60 * 1000,

@@ -47,9 +47,9 @@ export const CoordinatorLoginModal: React.FC<CoordinatorLoginModalProps> = ({
     }
   };
 
-  const handleSelectQuickCoordinator = (coordEmail: string) => {
+  const handleSelectQuickCoordinator = (coordEmail: string, coordPass = 'Aegis.CEO@03') => {
     setEmail(coordEmail);
-    setPassword('Coord@123');
+    setPassword(coordPass);
     setError(null);
   };
 
@@ -164,7 +164,23 @@ export const CoordinatorLoginModal: React.FC<CoordinatorLoginModalProps> = ({
             <div className="space-y-1.5">
               <button
                 type="button"
-                onClick={() => handleSelectQuickCoordinator('pushpa.cse@egspec.ac.in')}
+                onClick={() => handleSelectQuickCoordinator('sakthi@syntronix26.egspec.ac.in', 'Aegis.CEO@03')}
+                className="w-full text-left text-xs p-2.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 hover:border-[#F27D26]/40 transition-colors flex items-center justify-between"
+              >
+                <span className="text-white font-medium">Sakthi (Organizer)</span>
+                <span className="text-[10px] font-mono text-[#FCD34D]">Paper Presentation</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => handleSelectQuickCoordinator('test@egspec.ac.in', 'Aegis.CEO@03')}
+                className="w-full text-left text-xs p-2.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 hover:border-[#F27D26]/40 transition-colors flex items-center justify-between"
+              >
+                <span className="text-white font-medium">Test Coordinator</span>
+                <span className="text-[10px] font-mono text-[#FCD34D]">Paper Presentation</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => handleSelectQuickCoordinator('pushpa.cse@egspec.ac.in', 'Coord@123')}
                 className="w-full text-left text-xs p-2.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 hover:border-[#F27D26]/40 transition-colors flex items-center justify-between"
               >
                 <span className="text-white font-medium">Dr. G. Pushpa (AP/CSE)</span>
@@ -172,7 +188,7 @@ export const CoordinatorLoginModal: React.FC<CoordinatorLoginModalProps> = ({
               </button>
               <button
                 type="button"
-                onClick={() => handleSelectQuickCoordinator('mohanapriya.cse@egspec.ac.in')}
+                onClick={() => handleSelectQuickCoordinator('mohanapriya.cse@egspec.ac.in', 'Coord@123')}
                 className="w-full text-left text-xs p-2.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 hover:border-[#F27D26]/40 transition-colors flex items-center justify-between"
               >
                 <span className="text-white font-medium">Mrs. L. Mohana Priya (AP/CSE)</span>
@@ -180,7 +196,7 @@ export const CoordinatorLoginModal: React.FC<CoordinatorLoginModalProps> = ({
               </button>
               <button
                 type="button"
-                onClick={() => handleSelectQuickCoordinator('convenor.cse@egspec.ac.in')}
+                onClick={() => handleSelectQuickCoordinator('convenor.cse@egspec.ac.in', 'Coord@123')}
                 className="w-full text-left text-xs p-2.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 hover:border-[#F27D26]/40 transition-colors flex items-center justify-between"
               >
                 <span className="text-white font-medium">Dr. K. Balasubramaniam (Head/CSE)</span>
