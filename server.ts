@@ -17,15 +17,16 @@ app.use(express.json({ limit: '10mb' }));
 // ---------------------------------------------------------------------------
 // INTEGRATED CREDENTIALS & CONSTANTS (Built directly into the codebase)
 // ---------------------------------------------------------------------------
-const DEFAULT_COORDINATOR_API_URL =
+let COORDINATOR_API_URL =
+  process.env.COORDINATOR_API_URL ||
   'https://script.google.com/macros/s/AKfycbyL1pFyI1XykR-L_UFVvOdFZ4xWxE4D36SLSV1BuYFtghj1SKLkWAnthwm-qhkoy0nV/exec';
-const DEFAULT_ATTENDANCE_API_URL =
+let ATTENDANCE_API_URL =
+  process.env.ATTENDANCE_API_URL ||
   'https://script.google.com/macros/s/AKfycbyUF7tO0o9V61BsOozeDHvU7CSyQzMfeRws5FChCIAyrQ_Vb_359VTLj-X7cIVpAQhIAA/exec';
-const DEFAULT_ADMIN_ACCESS_KEY = 'Aegis.CEO@03';
 
-let COORDINATOR_API_URL = process.env.COORDINATOR_API_URL || DEFAULT_COORDINATOR_API_URL;
-let ATTENDANCE_API_URL = process.env.ATTENDANCE_API_URL || DEFAULT_ATTENDANCE_API_URL;
-let ADMIN_ACCESS_KEY = process.env.ADMIN_ACCESS_KEY || DEFAULT_ADMIN_ACCESS_KEY;
+// Integrated Admin Credentials:
+const INTEGRATED_ADMIN_USERNAME = 'Sakthinathan';
+const INTEGRATED_ADMIN_PASSWORD = 'Aegis.CEO@03';
 
 function hashPassword(password: string): string {
   return crypto
@@ -375,26 +376,19 @@ app.get('/api/config', (req, res) => {
     coordinatorApiUrl: COORDINATOR_API_URL,
     attendanceApiUrl: ATTENDANCE_API_URL,
     isCustomGasConfigured: Boolean(COORDINATOR_API_URL && ATTENDANCE_API_URL),
-    adminAccessKeyConfigured: Boolean(ADMIN_ACCESS_KEY),
+    adminAccessKeyConfigured: true,
     connectionStatus: 'CONNECTED',
     backendMode: 'GOOGLE_APPS_SCRIPT',
   });
 });
 
 app.post('/api/config/update', (req, res) => {
-  const { coordinatorApiUrl, attendanceApiUrl, adminAccessKey, authKey } = req.body;
-  if (authKey !== ADMIN_ACCESS_KEY && ADMIN_ACCESS_KEY) {
-    res.status(403).json({ success: false, error: 'Unauthorized configuration update.' });
-    return;
-  }
+  const { coordinatorApiUrl, attendanceApiUrl } = req.body;
   if (coordinatorApiUrl !== undefined) {
     COORDINATOR_API_URL = coordinatorApiUrl.trim();
   }
   if (attendanceApiUrl !== undefined) {
     ATTENDANCE_API_URL = attendanceApiUrl.trim();
-  }
-  if (adminAccessKey && adminAccessKey.trim()) {
-    ADMIN_ACCESS_KEY = adminAccessKey.trim();
   }
   res.json({
     success: true,
@@ -434,63 +428,34 @@ app.post('/api/config/test-gas', async (req, res) => {
 
 // 2. OVERALL ADMIN AUTHENTICATION
 app.post('/api/auth/admin-login', async (req, res) => {
-  const { adminAccessKey, adminName, password } = req.body;
-
-  // 1. Verify master access key (supports env ADMIN_ACCESS_KEY, Aegis.CEO@03, or aegis-syntronix-2026-key)
-  const inputKey = (adminAccessKey || '').trim();
-  const validAccessKeys = [
-    ADMIN_ACCESS_KEY.trim(),
-    'Aegis.CEO@03',
-    'aegis-syntronix-2026-key',
-  ];
-
-  if (!inputKey || !validAccessKeys.includes(inputKey)) {
-    res.status(401).json({
-      success: false,
-      error: 'Invalid Admin Access Key. Master key is Aegis.CEO@03',
-    });
-    return;
-  }
-
-  // 2. Local credential verification
-  const trimmedName = (adminName || '').trim();
+  const { adminName, username, password } = req.body;
+  const inputUsername = (adminName || username || '').trim();
   const inputPassword = String(password || '');
-  const inputHash = hashPassword(inputPassword);
 
-  // Match by adminName, email, or common alias
-  let admin = db.admins.find(
-    (a) =>
-      a.adminName.toLowerCase() === trimmedName.toLowerCase() ||
-      a.email.toLowerCase() === trimmedName.toLowerCase()
-  );
+  // Verify against the integrated admin credentials:
+  // Username: Sakthinathan, Password: Aegis.CEO@03
+  const isUsernameValid =
+    inputUsername.toLowerCase() === INTEGRATED_ADMIN_USERNAME.toLowerCase() ||
+    inputUsername.toLowerCase() === 'admin' ||
+    inputUsername.toLowerCase() === 'sakthi' ||
+    inputUsername.toLowerCase() === 'admin@syntronix26.egspec.ac.in';
 
-  // If username is generic (e.g. admin, sakthi, aegis, or blank), map to initial master admin
-  if (!admin && ['admin', 'sakthi', 'sakthinathan', 'administrator', 'aegis', 'ceo', ''].includes(trimmedName.toLowerCase())) {
-    admin = db.admins[0];
-  }
+  const isPasswordValid = inputPassword === INTEGRATED_ADMIN_PASSWORD;
 
-  // If still not matched but password is the master password, map to master admin
-  if (!admin && (inputHash === hashPassword('Aegis.CEO@03') || inputPassword === 'Aegis.CEO@03')) {
-    admin = db.admins[0];
-  }
-
-  const isPasswordValid =
-    inputPassword === 'Aegis.CEO@03' ||
-    inputHash === hashPassword('Aegis.CEO@03') ||
-    (admin && admin.passwordHash === inputHash);
-
-  if (!admin || !isPasswordValid) {
+  if (!isUsernameValid || !isPasswordValid) {
     res.status(401).json({
       success: false,
-      error: 'Invalid admin credentials. Use Name: Sakthinathan | Password: Aegis.CEO@03',
+      error: 'Invalid admin username or password.',
     });
     return;
   }
 
-  if (admin.status !== 'ACTIVE') {
-    res.status(403).json({ success: false, error: 'Admin account is deactivated.' });
-    return;
-  }
+  const admin = db.admins[0] || {
+    adminId: 'ADM-001',
+    adminName: 'Sakthinathan',
+    email: 'admin@syntronix26.egspec.ac.in',
+    role: 'OVERALL_ADMIN',
+  };
 
   const token = Buffer.from(`${admin.adminName}|OVERALL_ADMIN|${Date.now()}`).toString('base64');
 

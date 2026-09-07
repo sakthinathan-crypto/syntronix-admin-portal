@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import {
   X,
   Database,
-  KeyRound,
   CheckCircle2,
   AlertCircle,
   Copy,
@@ -26,7 +25,6 @@ export const SystemSettingsModal: React.FC<SystemSettingsModalProps> = ({
   onConfigSaved,
 }) => {
   const [gasUrl, setGasUrl] = useState('');
-  const [accessKey, setAccessKey] = useState('');
   const [activeTab, setActiveTab] = useState<'config' | 'gas_code' | 'instructions'>('config');
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
@@ -43,7 +41,6 @@ export const SystemSettingsModal: React.FC<SystemSettingsModalProps> = ({
     try {
       const cfg = await getSystemConfig();
       setGasUrl(cfg.googleAppsScriptUrl || '');
-      setAccessKey(cfg.adminAccessKey || '');
     } catch (e) {
       console.error(e);
     }
@@ -57,7 +54,6 @@ export const SystemSettingsModal: React.FC<SystemSettingsModalProps> = ({
       setSaving(true);
       const updated = await updateSystemConfig({
         googleAppsScriptUrl: gasUrl.trim(),
-        adminAccessKey: accessKey.trim(),
       });
       onConfigSaved(updated);
       alert('System configuration updated successfully.');
@@ -198,28 +194,6 @@ export const SystemSettingsModal: React.FC<SystemSettingsModalProps> = ({
                   </div>
                 </div>
               )}
-
-              {/* Admin Access Key */}
-              <div>
-                <label className="block text-xs font-mono uppercase text-white/60 mb-1.5">
-                  Admin Access Key (ADMIN_ACCESS_KEY)
-                </label>
-                <div className="relative">
-                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-white/40">
-                    <KeyRound className="w-4 h-4" />
-                  </div>
-                  <input
-                    type="password"
-                    value={accessKey}
-                    onChange={(e) => setAccessKey(e.target.value)}
-                    placeholder="aegis-syntronix-2026-key"
-                    className="w-full pl-9 pr-3 py-2.5 rounded-xl bg-white/5 border border-white/10 focus:border-[#F27D26] text-xs font-mono text-white focus:outline-none"
-                  />
-                </div>
-                <p className="text-[11px] text-white/40 font-mono mt-1">
-                  Used to guard the initial Overall Admin authentication endpoint.
-                </p>
-              </div>
 
               <div className="pt-4 border-t border-white/5 flex items-center justify-end gap-3">
                 <button

@@ -22,14 +22,13 @@ import {
 const API_BASE = '/api';
 
 export async function adminLogin(
-  adminAccessKey: string,
   adminName: string,
   password: string
 ): Promise<AuthSession> {
   const res = await fetch(`${API_BASE}/auth/admin-login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ adminAccessKey, adminName, password }),
+    body: JSON.stringify({ adminName, password }),
   });
 
   const data = await res.json();

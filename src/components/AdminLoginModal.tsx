@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Shield, KeyRound, Lock, Eye, EyeOff, X, AlertCircle, Sparkles } from 'lucide-react';
+import { Shield, User, Lock, Eye, EyeOff, X, AlertCircle } from 'lucide-react';
 import { adminLogin } from '../services/api';
 import { AuthSession } from '../types';
 
@@ -14,7 +14,6 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
   onClose,
   onLoginSuccess,
 }) => {
-  const [accessKey, setAccessKey] = useState('');
   const [adminName, setAdminName] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -27,35 +26,24 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
     e.preventDefault();
     setError(null);
 
-    if (!accessKey.trim()) {
-      setError('Admin Access Key is required.');
-      return;
-    }
     if (!adminName.trim()) {
-      setError('Admin Name is required.');
+      setError('Admin Username is required.');
       return;
     }
     if (!password) {
-      setError('Password is required.');
+      setError('Admin Password is required.');
       return;
     }
 
     try {
       setLoading(true);
-      const session = await adminLogin(accessKey.trim(), adminName.trim(), password);
+      const session = await adminLogin(adminName.trim(), password);
       onLoginSuccess(session);
     } catch (err: any) {
-      setError(err.message || 'Authentication failed. Please check credentials.');
+      setError(err.message || 'Authentication failed. Please check your credentials.');
     } finally {
       setLoading(false);
     }
-  };
-
-  const handlePrefillInitialAdmin = () => {
-    setAccessKey('Aegis.CEO@03');
-    setAdminName('Sakthinathan');
-    setPassword('Aegis.CEO@03');
-    setError(null);
   };
 
   return (
@@ -73,10 +61,10 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
               </div>
               <div>
                 <h3 className="text-lg font-bold text-white font-['Space_Grotesk']">
-                  Overall Admin Authentication
+                  Admin Login
                 </h3>
                 <p className="text-xs text-white/40 font-mono">
-                  SYNTRONIX &apos;26 • Master Security Clearance
+                  SYNTRONIX &apos;26 • Overall Administrator Portal
                 </p>
               </div>
             </div>
@@ -96,54 +84,31 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
           )}
 
           <form onSubmit={handleSubmit} className="space-y-4">
-            {/* Step 1: Admin Access Key */}
+            {/* 1. ADMIN USERNAME */}
             <div>
               <label className="block text-xs font-mono uppercase tracking-wider text-white/60 mb-1.5">
-                Admin Access Key (ADMIN_ACCESS_KEY)
+                Admin Username
               </label>
               <div className="relative">
                 <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-white/40">
-                  <KeyRound className="w-4 h-4" />
-                </div>
-                <input
-                  type="password"
-                  id="input-admin-access-key"
-                  value={accessKey}
-                  onChange={(e) => setAccessKey(e.target.value)}
-                  placeholder="Aegis.CEO@03"
-                  className="w-full pl-10 pr-3 py-2.5 rounded-xl bg-white/5 border border-white/10 focus:border-[#F27D26] focus:outline-none text-sm text-white placeholder-white/30 font-mono"
-                  autoComplete="off"
-                />
-              </div>
-              <p className="text-[10px] text-white/40 mt-1 font-mono">
-                Master access key (Default: Aegis.CEO@03)
-              </p>
-            </div>
-
-            {/* Step 2: Admin Username */}
-            <div>
-              <label className="block text-xs font-mono uppercase tracking-wider text-white/60 mb-1.5">
-                Admin Name
-              </label>
-              <div className="relative">
-                <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-white/40">
-                  <Shield className="w-4 h-4" />
+                  <User className="w-4 h-4" />
                 </div>
                 <input
                   type="text"
-                  id="input-admin-name"
+                  id="input-admin-username"
                   value={adminName}
                   onChange={(e) => setAdminName(e.target.value)}
-                  placeholder="Sakthinathan"
+                  placeholder="Enter admin username"
                   className="w-full pl-10 pr-3 py-2.5 rounded-xl bg-white/5 border border-white/10 focus:border-[#F27D26] focus:outline-none text-sm text-white placeholder-white/30"
+                  autoComplete="username"
                 />
               </div>
             </div>
 
-            {/* Step 3: Password */}
+            {/* 2. ADMIN PASSWORD */}
             <div>
               <label className="block text-xs font-mono uppercase tracking-wider text-white/60 mb-1.5">
-                Password
+                Admin Password
               </label>
               <div className="relative">
                 <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-white/40">
@@ -156,6 +121,7 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••••••••"
                   className="w-full pl-10 pr-10 py-2.5 rounded-xl bg-white/5 border border-white/10 focus:border-[#F27D26] focus:outline-none text-sm text-white placeholder-white/30 font-mono"
+                  autoComplete="current-password"
                 />
                 <button
                   type="button"
@@ -167,43 +133,25 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
               </div>
             </div>
 
-            {/* Submit button */}
+            {/* 3. LOGIN / AUTHENTICATE BUTTON */}
             <div className="pt-2">
               <button
                 type="submit"
-                id="btn-submit-admin-auth"
+                id="btn-submit-admin-login"
                 disabled={loading}
                 className="w-full py-3.5 px-4 rounded-xl font-bold text-xs uppercase tracking-widest text-[#070707] bg-[#F27D26] hover:opacity-90 shadow-lg shadow-[#F27D26]/20 active:scale-[0.98] transition-all disabled:opacity-50 flex items-center justify-center gap-2"
               >
                 {loading ? (
                   <>
                     <span className="w-4 h-4 border-2 border-black border-t-transparent rounded-full animate-spin" />
-                    <span>Verifying Credentials...</span>
+                    <span>Authenticating...</span>
                   </>
                 ) : (
-                  <>
-                    <KeyRound className="w-4 h-4 text-[#070707]" />
-                    <span>AUTHENTICATE OVERALL ADMIN</span>
-                  </>
+                  <span>AUTHENTICATE</span>
                 )}
               </button>
             </div>
           </form>
-
-          {/* Quick test prefill helper */}
-          <div className="mt-5 pt-4 border-t border-white/5 flex items-center justify-between">
-            <span className="text-[11px] text-white/40 font-mono">
-              Initial Admin: Sakthinathan
-            </span>
-            <button
-              type="button"
-              onClick={handlePrefillInitialAdmin}
-              className="text-[11px] font-mono text-[#F27D26] hover:opacity-80 hover:underline flex items-center gap-1"
-            >
-              <Sparkles className="w-3 h-3" />
-              <span>Fill Initial Credentials</span>
-            </button>
-          </div>
         </div>
       </div>
     </div>
