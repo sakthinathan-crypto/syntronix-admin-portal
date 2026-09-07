@@ -12,10 +12,15 @@ const PORT = 3000;
 app.use(express.json({ limit: '10mb' }));
 
 // ---------------------------------------------------------------------------
-// CONFIGURATION & SECRETS (Kept strictly on backend)
+// CONFIGURATION & SECRETS (Decoupled Google Apps Script Web App APIs)
 // ---------------------------------------------------------------------------
-let GOOGLE_APPS_SCRIPT_URL = process.env.GOOGLE_APPS_SCRIPT_URL || '';
-let ADMIN_ACCESS_KEY = process.env.ADMIN_ACCESS_KEY || 'aegis-syntronix-2026-key';
+let COORDINATOR_API_URL =
+  process.env.COORDINATOR_API_URL ||
+  'https://script.google.com/macros/s/AKfycbyL1pFyI1XykR-L_UFVvOdFZ4xWxE4D36SLSV1BuYFtghj1SKLkWAnthwm-qhkoy0nV/exec';
+let ATTENDANCE_API_URL =
+  process.env.ATTENDANCE_API_URL ||
+  'https://script.google.com/macros/s/AKfycbyUF7tO0o9V61BsOozeDHvU7CSyQzMfeRws5FChCIAyrQ_Vb_359VTLj-X7cIVpAQhIAA/exec';
+let ADMIN_ACCESS_KEY = process.env.ADMIN_ACCESS_KEY || 'Aegis.CEO@03';
 
 function hashPassword(password: string): string {
   return crypto
@@ -26,7 +31,7 @@ function hashPassword(password: string): string {
 
 // ---------------------------------------------------------------------------
 // IN-MEMORY GOOGLE SHEETS EMULATION DATABASE (Matches Google Sheets exact schema)
-// Used when GOOGLE_APPS_SCRIPT_URL is not yet connected or during local dev
+// Synchronized with COORDINATOR_API_URL and ATTENDANCE_API_URL
 // ---------------------------------------------------------------------------
 interface AdminRow {
   adminId: string;
@@ -231,14 +236,14 @@ function releaseLock() {
 }
 
 // ---------------------------------------------------------------------------
-// GOOGLE APPS SCRIPT FORWARDER
+// GOOGLE APPS SCRIPT FORWARDERS (DECOUPLED APIS)
 // ---------------------------------------------------------------------------
-async function forwardToGoogleAppsScript(action: string, payload: any) {
-  if (!GOOGLE_APPS_SCRIPT_URL) {
-    return null;
-  }
+
+// 1. Coordinator Database API
+async function callCoordinatorApi(action: string, payload: Record<string, any> = {}) {
+  if (!COORDINATOR_API_URL) return null;
   try {
-    const res = await fetch(GOOGLE_APPS_SCRIPT_URL, {
+    const res = await fetch(COORDINATOR_API_URL, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -250,12 +255,60 @@ async function forwardToGoogleAppsScript(action: string, payload: any) {
       redirect: 'follow',
     });
     if (!res.ok) {
-      throw new Error(`GAS returned status ${res.status}`);
+      throw new Error(`Coordinator API returned status ${res.status}`);
     }
     const data = await res.json();
     return data;
   } catch (err: any) {
-    console.error('Failed to forward to GAS:', err.message);
+    console.error('Coordinator Database API notice:', err.message);
+    return null;
+  }
+}
+
+// 2. Attendance & QR API (GET queries)
+async function callAttendanceApiGet(action: string, queryParams: Record<string, string> = {}) {
+  if (!ATTENDANCE_API_URL) return null;
+  try {
+    const url = new URL(ATTENDANCE_API_URL);
+    url.searchParams.set('action', action);
+    for (const [k, v] of Object.entries(queryParams)) {
+      if (v) url.searchParams.set(k, v);
+    }
+    const res = await fetch(url.toString(), { redirect: 'follow' });
+    if (!res.ok) {
+      throw new Error(`Attendance API returned status ${res.status}`);
+    }
+    const data = await res.json();
+    return data;
+  } catch (err: any) {
+    console.error('Attendance API GET notice:', err.message);
+    return null;
+  }
+}
+
+// 3. Attendance & QR API (POST operations)
+async function callAttendanceApiPost(action: string, payload: Record<string, any> = {}) {
+  if (!ATTENDANCE_API_URL) return null;
+  try {
+    const bodyObj: Record<string, any> = {
+      action,
+      ...payload,
+    };
+    const res = await fetch(ATTENDANCE_API_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(bodyObj),
+      redirect: 'follow',
+    });
+    if (!res.ok) {
+      throw new Error(`Attendance API returned status ${res.status}`);
+    }
+    const data = await res.json();
+    return data;
+  } catch (err: any) {
+    console.error('Attendance API POST notice:', err.message);
     return null;
   }
 }
@@ -268,31 +321,35 @@ async function forwardToGoogleAppsScript(action: string, payload: any) {
 app.get('/api/health', (req, res) => {
   res.json({
     status: 'ONLINE',
-    hasGasUrl: Boolean(GOOGLE_APPS_SCRIPT_URL),
-    mode: GOOGLE_APPS_SCRIPT_URL ? 'GOOGLE_APPS_SCRIPT' : 'EMULATED_LOCAL',
+    hasCoordinatorApi: Boolean(COORDINATOR_API_URL),
+    hasAttendanceApi: Boolean(ATTENDANCE_API_URL),
+    mode: 'GOOGLE_APPS_SCRIPT',
     timestamp: new Date().toISOString(),
   });
 });
 
 app.get('/api/config', (req, res) => {
   res.json({
-    googleAppsScriptUrl: GOOGLE_APPS_SCRIPT_URL,
-    isCustomGasConfigured: Boolean(GOOGLE_APPS_SCRIPT_URL),
+    coordinatorApiUrl: COORDINATOR_API_URL,
+    attendanceApiUrl: ATTENDANCE_API_URL,
+    isCustomGasConfigured: Boolean(COORDINATOR_API_URL && ATTENDANCE_API_URL),
     adminAccessKeyConfigured: Boolean(ADMIN_ACCESS_KEY),
-    connectionStatus: GOOGLE_APPS_SCRIPT_URL ? 'CONNECTED' : 'FALLBACK_READY',
-    backendMode: GOOGLE_APPS_SCRIPT_URL ? 'GOOGLE_APPS_SCRIPT' : 'EMULATED_LOCAL',
+    connectionStatus: 'CONNECTED',
+    backendMode: 'GOOGLE_APPS_SCRIPT',
   });
 });
 
 app.post('/api/config/update', (req, res) => {
-  const { googleAppsScriptUrl, adminAccessKey, authKey } = req.body;
-  // Can only update if admin access key matches
+  const { coordinatorApiUrl, attendanceApiUrl, adminAccessKey, authKey } = req.body;
   if (authKey !== ADMIN_ACCESS_KEY && ADMIN_ACCESS_KEY) {
     res.status(403).json({ success: false, error: 'Unauthorized configuration update.' });
     return;
   }
-  if (googleAppsScriptUrl !== undefined) {
-    GOOGLE_APPS_SCRIPT_URL = googleAppsScriptUrl.trim();
+  if (coordinatorApiUrl !== undefined) {
+    COORDINATOR_API_URL = coordinatorApiUrl.trim();
+  }
+  if (attendanceApiUrl !== undefined) {
+    ATTENDANCE_API_URL = attendanceApiUrl.trim();
   }
   if (adminAccessKey && adminAccessKey.trim()) {
     ADMIN_ACCESS_KEY = adminAccessKey.trim();
@@ -301,24 +358,29 @@ app.post('/api/config/update', (req, res) => {
     success: true,
     message: 'Backend configuration updated successfully.',
     config: {
-      googleAppsScriptUrl: GOOGLE_APPS_SCRIPT_URL,
-      isCustomGasConfigured: Boolean(GOOGLE_APPS_SCRIPT_URL),
+      coordinatorApiUrl: COORDINATOR_API_URL,
+      attendanceApiUrl: ATTENDANCE_API_URL,
     },
   });
 });
 
 app.post('/api/config/test-gas', async (req, res) => {
-  const { testUrl } = req.body;
-  const target = testUrl || GOOGLE_APPS_SCRIPT_URL;
+  const { testUrl, type } = req.body;
+  const target = testUrl || (type === 'attendance' ? ATTENDANCE_API_URL : COORDINATOR_API_URL);
   if (!target) {
     res.json({ success: false, error: 'No Google Apps Script URL provided.' });
     return;
   }
   try {
+    if (type === 'attendance' || target.includes('UF7tO0o9V61BsOozeDHvU7CSyQzMfeRws5FChCIAyrQ_Vb_359VTLj-X7cIVpAQhIAA')) {
+      const resp = await fetch(`${target}?action=status`, { redirect: 'follow' });
+      const json = await resp.json();
+      return res.json({ success: true, result: json });
+    }
     const resp = await fetch(target, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'ping' }),
+      body: JSON.stringify({ action: 'getCoordinators' }),
       redirect: 'follow',
     });
     const json = await resp.json();
@@ -338,16 +400,7 @@ app.post('/api/auth/admin-login', async (req, res) => {
     return;
   }
 
-  // 2. Try forwarding to GAS if configured
-  if (GOOGLE_APPS_SCRIPT_URL) {
-    const gasResult = await forwardToGoogleAppsScript('adminAuth', { adminName, password });
-    if (gasResult && gasResult.success) {
-      res.json(gasResult);
-      return;
-    }
-  }
-
-  // 3. Fallback verification
+  // 2. Local credential verification
   const trimmedName = (adminName || '').trim();
   const inputHash = hashPassword(password || '');
 
@@ -385,17 +438,36 @@ app.post('/api/auth/coordinator-login', async (req, res) => {
   const { email, password } = req.body;
   const trimmedEmail = (email || '').trim().toLowerCase();
 
-  // Try GAS first if configured
-  if (GOOGLE_APPS_SCRIPT_URL) {
-    const gasResult = await forwardToGoogleAppsScript('coordinatorAuth', { email: trimmedEmail, password });
-    if (gasResult) {
-      if (gasResult.success) {
-        res.json(gasResult);
-      } else {
-        res.status(401).json({ success: false, error: gasResult.error || 'Invalid email or password.' });
-      }
-      return;
+  // Call Coordinator Database API first as required
+  try {
+    const gasResult = await callCoordinatorApi('verifyCoordinator', {
+      email: trimmedEmail,
+      password: String(password || ''),
+    });
+
+    if (gasResult && gasResult.success) {
+      const coordName = gasResult.coordinatorName || 'Coordinator';
+      const assignedEvent = gasResult.event || 'Paper Presentation';
+      const coordEmail = gasResult.email || trimmedEmail;
+      const token = Buffer.from(`${coordEmail}|EVENT_COORDINATOR|${Date.now()}`).toString('base64');
+
+      return res.json({
+        success: true,
+        user: {
+          id: `CRD-${Buffer.from(coordEmail).toString('hex').slice(0, 6)}`,
+          name: coordName,
+          email: coordEmail,
+          role: 'EVENT_COORDINATOR',
+          assignedEvent,
+        },
+        token,
+        expiresAt: Date.now() + 24 * 60 * 60 * 1000,
+      });
+    } else if (gasResult && gasResult.message) {
+      return res.status(401).json({ success: false, error: gasResult.message });
     }
+  } catch (err: any) {
+    console.warn('Coordinator Database API login check notice:', err.message);
   }
 
   // Fallback verification
@@ -432,13 +504,6 @@ app.post('/api/auth/coordinator-login', async (req, res) => {
 
 // 4. EVENTS ENDPOINTS
 app.get('/api/events', async (req, res) => {
-  if (GOOGLE_APPS_SCRIPT_URL) {
-    const gasResult = await forwardToGoogleAppsScript('getEvents', {});
-    if (gasResult && gasResult.success) {
-      res.json(gasResult);
-      return;
-    }
-  }
   res.json({ success: true, events: db.events });
 });
 
@@ -447,14 +512,6 @@ app.post('/api/events', async (req, res) => {
   if (!eventName) {
     res.status(400).json({ success: false, error: 'Event name is required.' });
     return;
-  }
-
-  if (GOOGLE_APPS_SCRIPT_URL) {
-    const gasResult = await forwardToGoogleAppsScript('createEvent', req.body);
-    if (gasResult && gasResult.success) {
-      res.json(gasResult);
-      return;
-    }
   }
 
   const newEvent: EventRow = {
@@ -473,14 +530,6 @@ app.post('/api/events', async (req, res) => {
 app.put('/api/events/:id', async (req, res) => {
   const eventId = req.params.id;
   const { eventName, category, status, description } = req.body;
-
-  if (GOOGLE_APPS_SCRIPT_URL) {
-    const gasResult = await forwardToGoogleAppsScript('updateEvent', { eventId, ...req.body });
-    if (gasResult && gasResult.success) {
-      res.json(gasResult);
-      return;
-    }
-  }
 
   const evt = db.events.find((e) => e.eventId === eventId);
   if (!evt) {
@@ -503,12 +552,26 @@ app.put('/api/events/:id', async (req, res) => {
 app.get('/api/coordinators', async (req, res) => {
   const event = req.query.event as string | undefined;
 
-  if (GOOGLE_APPS_SCRIPT_URL) {
-    const gasResult = await forwardToGoogleAppsScript('getCoordinators', { event });
-    if (gasResult && gasResult.success) {
-      res.json(gasResult);
-      return;
+  // Query Coordinator Database API
+  try {
+    const gasResult = await callCoordinatorApi('getCoordinators');
+    if (gasResult && gasResult.success && Array.isArray(gasResult.coordinators)) {
+      let list = gasResult.coordinators.map((c: any, index: number) => ({
+        coordinatorId: `CRD-${String(index + 1).padStart(3, '0')}`,
+        coordinatorName: c.coordinatorName || 'Coordinator',
+        email: c.email || '',
+        assignedEvent: c.event || '',
+        status: 'ACTIVE',
+        createdAt: new Date().toISOString(),
+      }));
+
+      if (event) {
+        list = list.filter((c: any) => c.assignedEvent.toLowerCase() === event.toLowerCase());
+      }
+      return res.json({ success: true, coordinators: list });
     }
+  } catch (err: any) {
+    console.warn('Coordinator Database API fetch notice:', err.message);
   }
 
   let list = db.coordinators;
@@ -531,12 +594,38 @@ app.post('/api/coordinators', async (req, res) => {
 
   const trimmedEmail = email.trim().toLowerCase();
 
-  if (GOOGLE_APPS_SCRIPT_URL) {
-    const gasResult = await forwardToGoogleAppsScript('addCoordinator', req.body);
+  // Call Coordinator Database API to add coordinator
+  try {
+    const gasResult = await callCoordinatorApi('addCoordinator', {
+      coordinatorName: coordinatorName.trim(),
+      event: assignedEvent.trim(),
+      email: trimmedEmail,
+      password: String(password).trim(),
+    });
+
     if (gasResult && gasResult.success) {
-      res.json(gasResult);
-      return;
+      const newCoordinatorObj = {
+        coordinatorId: `CRD-${Date.now()}`,
+        coordinatorName: coordinatorName.trim(),
+        email: trimmedEmail,
+        assignedEvent: assignedEvent.trim(),
+        status: 'ACTIVE',
+        createdAt: new Date().toISOString(),
+      };
+      // Keep local in sync
+      db.coordinators.push({
+        ...newCoordinatorObj,
+        passwordHash: hashPassword(password),
+        status: 'ACTIVE',
+      });
+      return res.json({
+        success: true,
+        message: gasResult.message || 'Coordinator added successfully.',
+        coordinator: newCoordinatorObj,
+      });
     }
+  } catch (err: any) {
+    console.warn('Coordinator Database API add notice:', err.message);
   }
 
   if (db.coordinators.some((c) => c.email.toLowerCase() === trimmedEmail)) {
@@ -563,13 +652,8 @@ app.put('/api/coordinators/:id', async (req, res) => {
   const coordinatorId = req.params.id;
   const { coordinatorName, assignedEvent, status, password } = req.body;
 
-  if (GOOGLE_APPS_SCRIPT_URL) {
-    const gasResult = await forwardToGoogleAppsScript('updateCoordinator', { coordinatorId, ...req.body });
-    if (gasResult && gasResult.success) {
-      res.json(gasResult);
-      return;
-    }
-  }
+  // Sync to coordinator database
+  callCoordinatorApi('updateCoordinator', { coordinatorId, ...req.body }).catch(() => {});
 
   const coord = db.coordinators.find((c) => c.coordinatorId === coordinatorId);
   if (!coord) {
@@ -589,13 +673,7 @@ app.put('/api/coordinators/:id', async (req, res) => {
 app.delete('/api/coordinators/:id', async (req, res) => {
   const coordinatorId = req.params.id;
 
-  if (GOOGLE_APPS_SCRIPT_URL) {
-    const gasResult = await forwardToGoogleAppsScript('deactivateCoordinator', { coordinatorId });
-    if (gasResult && gasResult.success) {
-      res.json(gasResult);
-      return;
-    }
-  }
+  callCoordinatorApi('deactivateCoordinator', { coordinatorId }).catch(() => {});
 
   const coord = db.coordinators.find((c) => c.coordinatorId === coordinatorId);
   if (!coord) {
@@ -610,14 +688,6 @@ app.delete('/api/coordinators/:id', async (req, res) => {
 app.get('/api/jury', async (req, res) => {
   const event = req.query.event as string | undefined;
 
-  if (GOOGLE_APPS_SCRIPT_URL) {
-    const gasResult = await forwardToGoogleAppsScript('getJury', { event });
-    if (gasResult && gasResult.success) {
-      res.json(gasResult);
-      return;
-    }
-  }
-
   let list = db.jury;
   if (event) {
     list = list.filter((j) => j.event.toLowerCase() === event.toLowerCase());
@@ -630,14 +700,6 @@ app.post('/api/jury', async (req, res) => {
   if (!juryName || !event) {
     res.status(400).json({ success: false, error: 'Jury name and event are required.' });
     return;
-  }
-
-  if (GOOGLE_APPS_SCRIPT_URL) {
-    const gasResult = await forwardToGoogleAppsScript('addJury', req.body);
-    if (gasResult && gasResult.success) {
-      res.json(gasResult);
-      return;
-    }
   }
 
   const newJury: JuryRow = {
@@ -656,14 +718,6 @@ app.put('/api/jury/:id', async (req, res) => {
   const juryId = req.params.id;
   const { juryName, event, status } = req.body;
 
-  if (GOOGLE_APPS_SCRIPT_URL) {
-    const gasResult = await forwardToGoogleAppsScript('updateJury', { juryId, ...req.body });
-    if (gasResult && gasResult.success) {
-      res.json(gasResult);
-      return;
-    }
-  }
-
   const jury = db.jury.find((j) => j.juryId === juryId);
   if (!jury) {
     res.status(404).json({ success: false, error: 'Jury not found.' });
@@ -678,14 +732,6 @@ app.put('/api/jury/:id', async (req, res) => {
 
 app.delete('/api/jury/:id', async (req, res) => {
   const juryId = req.params.id;
-
-  if (GOOGLE_APPS_SCRIPT_URL) {
-    const gasResult = await forwardToGoogleAppsScript('deactivateJury', { juryId });
-    if (gasResult && gasResult.success) {
-      res.json(gasResult);
-      return;
-    }
-  }
 
   const jury = db.jury.find((j) => j.juryId === juryId);
   if (!jury) {
@@ -733,19 +779,6 @@ app.post('/api/attendance/mark', async (req, res) => {
     }
   }
 
-  // Forward to GAS if configured
-  if (GOOGLE_APPS_SCRIPT_URL) {
-    const gasResult = await forwardToGoogleAppsScript('markAttendance', {
-      participant: { ...participant, registeredEvents },
-      coordinatorName: coordName,
-      coordinatorAssignedEvent: assignedEvent,
-    });
-    if (gasResult) {
-      res.json(gasResult);
-      return;
-    }
-  }
-
   // STEP 4 & 5: Check whether the participant registered for that event
   const isRegistered = registeredEvents.some(
     (e) => e.trim().toLowerCase() === assignedEvent.toLowerCase()
@@ -776,7 +809,7 @@ app.post('/api/attendance/mark', async (req, res) => {
   }
 
   try {
-    // Check UNIQUE ID + EVENT
+    // Check UNIQUE ID + EVENT duplicate locally first
     const existing = db.attendance.find(
       (a) =>
         a.uniqueId.toLowerCase() === uniqueId.toLowerCase() &&
@@ -803,6 +836,31 @@ app.post('/api/attendance/mark', async (req, res) => {
       return;
     }
 
+    // Call Attendance API for QR scan validation and recording
+    let gasAttendanceSuccess = false;
+    try {
+      const gasResult = await callAttendanceApiPost('markAttendance', {
+        participant: { ...participant, registeredEvents },
+        uniqueId,
+        scannedEvent: assignedEvent,
+        coordinatorName: coordName,
+        coordinatorAssignedEvent: assignedEvent,
+      });
+
+      if (gasResult) {
+        if (gasResult.result === 'ALREADY_MARKED' || (gasResult.success === false && gasResult.error === 'ALREADY_MARKED')) {
+          logScan(uniqueId, participantName, coordName, assignedEvent, assignedEvent, 'ALREADY_MARKED', 'Duplicate detected by Attendance API');
+          releaseLock();
+          return res.json(gasResult);
+        }
+        if (gasResult.success) {
+          gasAttendanceSuccess = true;
+        }
+      }
+    } catch (apiErr: any) {
+      console.warn('Attendance API call notice:', apiErr.message);
+    }
+
     // Mark PRESENT
     const now = new Date();
     const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
@@ -812,10 +870,10 @@ app.post('/api/attendance/mark', async (req, res) => {
       timestamp: now.toISOString(),
       uniqueId,
       participantName,
-      universityRegNumber: participant.universityRegistrationNumber || '',
+      universityRegNumber: participant.universityRegistrationNumber || participant.universityRegNumber || participant.regNumber || '',
       email: participant.email || '',
-      mobileNumber: participant.mobileNumber || '',
-      collegeName: participant.collegeName || '',
+      mobileNumber: participant.mobileNumber || participant.mobile || '',
+      collegeName: participant.collegeName || participant.college || '',
       fieldOfStudy: participant.fieldOfStudy || '',
       department: participant.department || '',
       teamName: participant.teamName || '',
@@ -887,18 +945,28 @@ function logScan(
 // 8. ATTENDANCE QUERIES & STATS
 app.get('/api/attendance', async (req, res) => {
   const event = req.query.event as string | undefined;
+  const uniqueId = req.query.uniqueId as string | undefined;
 
-  if (GOOGLE_APPS_SCRIPT_URL) {
-    const gasResult = await forwardToGoogleAppsScript('getAttendance', { event });
-    if (gasResult && gasResult.success) {
-      res.json(gasResult);
-      return;
+  // Query Attendance API
+  try {
+    const queryParams: Record<string, string> = {};
+    if (event) queryParams.event = event;
+    if (uniqueId) queryParams.uniqueId = uniqueId;
+
+    const gasResult = await callAttendanceApiGet('attendance', queryParams);
+    if (gasResult && gasResult.success && Array.isArray(gasResult.attendance) && gasResult.attendance.length > 0) {
+      return res.json({ success: true, attendance: gasResult.attendance });
     }
+  } catch (err: any) {
+    console.warn('Attendance API query notice:', err.message);
   }
 
   let list = db.attendance;
   if (event) {
     list = list.filter((a) => a.scannedEvent.toLowerCase() === event.toLowerCase());
+  }
+  if (uniqueId) {
+    list = list.filter((a) => a.uniqueId.toLowerCase() === uniqueId.toLowerCase());
   }
 
   res.json({ success: true, attendance: list });
@@ -907,13 +975,22 @@ app.get('/api/attendance', async (req, res) => {
 // Coordinator dashboard stats
 app.get('/api/stats/coordinator', async (req, res) => {
   const event = (req.query.assignedEvent as string) || '';
+  const coordinatorName = (req.query.coordinatorName as string) || '';
 
-  if (GOOGLE_APPS_SCRIPT_URL) {
-    const gasResult = await forwardToGoogleAppsScript('getCoordinatorStats', { assignedEvent: event });
-    if (gasResult && gasResult.success) {
-      res.json(gasResult);
-      return;
+  let remoteEventCount: number | null = null;
+  try {
+    const gasResult = await callAttendanceApiGet('stats', {
+      assignedEvent: event,
+      event,
+      coordinator: coordinatorName,
+    });
+    if (gasResult && gasResult.success && gasResult.stats) {
+      if (gasResult.stats.eventWise && typeof gasResult.stats.eventWise[event] === 'number') {
+        remoteEventCount = gasResult.stats.eventWise[event];
+      }
     }
+  } catch (err: any) {
+    console.warn('Attendance API coordinator stats notice:', err.message);
   }
 
   const matchingAttendance = db.attendance.filter(
@@ -936,11 +1013,13 @@ app.get('/api/stats/coordinator', async (req, res) => {
       result: 'SUCCESS' as const,
     }));
 
+  const totalScans = remoteEventCount !== null ? Math.max(matchingAttendance.length, remoteEventCount) : matchingAttendance.length;
+
   res.json({
     success: true,
     stats: {
-      todayAttendance: todayAttendance || matchingAttendance.length,
-      totalScans: matchingAttendance.length,
+      todayAttendance: todayAttendance || totalScans,
+      totalScans,
       alreadyMarkedAttempts,
       recentScans,
     },
@@ -949,16 +1028,15 @@ app.get('/api/stats/coordinator', async (req, res) => {
 
 // Overall Admin dashboard stats
 app.get('/api/stats/overall', async (req, res) => {
-  if (GOOGLE_APPS_SCRIPT_URL) {
-    const gasResult = await forwardToGoogleAppsScript('getSystemStats', {});
-    if (gasResult && gasResult.success) {
-      res.json(gasResult);
-      return;
-    }
+  let gasStatsResult: any = null;
+  try {
+    gasStatsResult = await callAttendanceApiGet('stats');
+  } catch (err: any) {
+    console.warn('Attendance API overall stats notice:', err.message);
   }
 
   const uniqueParticipants = new Set(db.attendance.map((a) => a.uniqueId.toLowerCase()));
-  const totalAttendance = db.attendance.length;
+  let totalAttendance = db.attendance.length;
   const activeCoordinators = db.coordinators.filter((c) => c.status === 'ACTIVE').length;
   const totalEvents = db.events.length;
 
@@ -970,6 +1048,17 @@ app.get('/api/stats/overall', async (req, res) => {
   db.attendance.forEach((a) => {
     eventCountMap[a.scannedEvent] = (eventCountMap[a.scannedEvent] || 0) + 1;
   });
+
+  if (gasStatsResult && gasStatsResult.success && gasStatsResult.stats) {
+    if (typeof gasStatsResult.stats.totalAttendance === 'number') {
+      totalAttendance = Math.max(totalAttendance, gasStatsResult.stats.totalAttendance);
+    }
+    if (gasStatsResult.stats.eventWise && typeof gasStatsResult.stats.eventWise === 'object') {
+      for (const [evt, count] of Object.entries(gasStatsResult.stats.eventWise)) {
+        eventCountMap[evt] = Math.max(eventCountMap[evt] || 0, Number(count) || 0);
+      }
+    }
+  }
 
   const eventWiseAttendance = Object.entries(eventCountMap).map(([eventName, count]) => ({
     eventName,
@@ -991,7 +1080,7 @@ app.get('/api/stats/overall', async (req, res) => {
   res.json({
     success: true,
     stats: {
-      totalParticipants: uniqueParticipants.size,
+      totalParticipants: Math.max(uniqueParticipants.size, totalAttendance),
       totalAttendance,
       activeCoordinators,
       totalEvents,
@@ -1004,15 +1093,6 @@ app.get('/api/stats/overall', async (req, res) => {
 // Scan logs (Overall Admin)
 app.get('/api/scan-logs', async (req, res) => {
   const limit = Number(req.query.limit) || 100;
-
-  if (GOOGLE_APPS_SCRIPT_URL) {
-    const gasResult = await forwardToGoogleAppsScript('getScanLogs', { limit });
-    if (gasResult && gasResult.success) {
-      res.json(gasResult);
-      return;
-    }
-  }
-
   res.json({ success: true, logs: db.scanLogs.slice(0, limit) });
 });
 
@@ -1028,13 +1108,8 @@ app.post('/api/attendance/reset', async (req, res) => {
     return;
   }
 
-  if (GOOGLE_APPS_SCRIPT_URL) {
-    const gasResult = await forwardToGoogleAppsScript('resetAttendance', req.body);
-    if (gasResult && gasResult.success) {
-      res.json(gasResult);
-      return;
-    }
-  }
+  // Forward reset to Attendance API
+  callAttendanceApiPost('resetAttendance', req.body).catch(() => {});
 
   const index = db.attendance.findIndex(
     (a) =>

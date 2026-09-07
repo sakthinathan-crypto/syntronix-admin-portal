@@ -153,7 +153,7 @@ export const SystemSettingsModal: React.FC<SystemSettingsModalProps> = ({
               {/* GAS URL Field */}
               <div>
                 <label className="block text-xs font-mono uppercase text-white/60 mb-1.5">
-                  Google Apps Script Web App URL (GOOGLE_APPS_SCRIPT_URL)
+                  Google Apps Script Web App Endpoint
                 </label>
                 <div className="flex gap-2">
                   <input
