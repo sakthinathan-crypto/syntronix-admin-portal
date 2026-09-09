@@ -46,6 +46,8 @@ import {
   addParticipant,
   updateParticipant,
   deleteParticipant,
+  isCoordinatorDeletedClient,
+  addDeletedCoordinatorLocal,
 } from '../services/api';
 import { EventManagementModal } from './EventManagementModal';
 import { ResetAttendanceModal } from './ResetAttendanceModal';
@@ -109,7 +111,17 @@ export const OverallAdminDashboard: React.FC<OverallAdminDashboardProps> = ({
     try {
       setDeletingCoord(true);
       setDeleteErrorMessage(null);
-      const res = await deleteCoordinator(coordinatorToDelete.email, coordinatorToDelete.coordinatorId);
+      const targetEmail = coordinatorToDelete.email;
+      const targetId = coordinatorToDelete.coordinatorId;
+      const targetName = coordinatorToDelete.coordinatorName;
+
+      // Mark locally immediately so it disappears from UI
+      addDeletedCoordinatorLocal([targetEmail, targetId, targetName]);
+      setCoordinators((prev) =>
+        prev.filter((c) => !isCoordinatorDeletedClient(c))
+      );
+
+      const res = await deleteCoordinator(targetEmail, targetId, targetName);
       setDeleteSuccessMessage(res.message || 'Coordinator deleted successfully.');
       setCoordinatorToDelete(null);
       await loadAllData();
@@ -1195,7 +1207,7 @@ export const OverallAdminDashboard: React.FC<OverallAdminDashboardProps> = ({
                 </tr>
               </thead>
               <tbody className="divide-y divide-white/5 font-mono">
-                {coordinators.map((c) => (
+                {coordinators.filter((c) => !isCoordinatorDeletedClient(c)).map((c) => (
                   <tr key={c.coordinatorId} className="hover:bg-white/[0.03]">
                     <td className="py-3 px-4 font-bold text-[#F27D26]">{c.coordinatorId}</td>
                     <td className="py-3 px-4 font-sans font-medium text-white">
@@ -1231,7 +1243,7 @@ export const OverallAdminDashboard: React.FC<OverallAdminDashboardProps> = ({
                     </td>
                   </tr>
                 ))}
-                {coordinators.length === 0 && (
+                {coordinators.filter((c) => !isCoordinatorDeletedClient(c)).length === 0 && (
                   <tr>
                     <td colSpan={6} className="py-8 text-center text-white/40 font-mono">
                       No coordinators found in roster.

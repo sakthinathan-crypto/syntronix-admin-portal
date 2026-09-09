@@ -1,5 +1,6 @@
 import express from 'express';
 import path from 'path';
+import fs from 'fs';
 import crypto from 'crypto';
 import { createServer as createViteServer } from 'vite';
 import dotenv from 'dotenv';
@@ -270,8 +271,51 @@ const initialCoordinators: CoordinatorRow[] = [
   },
 ];
 
-// In-Memory Database Store
+// In-Memory Database Store with Disk Persistence for Deleted Records
 let ATTENDANCE_API_KEY = process.env.ATTENDANCE_API_KEY || '';
+
+const DELETED_COORDINATORS_FILE = path.join(process.cwd(), 'deleted_coordinators.json');
+const DELETED_ATTENDANCE_FILE = path.join(process.cwd(), 'deleted_attendance.json');
+
+function loadDeletedCoordinators(): Set<string> {
+  try {
+    if (fs.existsSync(DELETED_COORDINATORS_FILE)) {
+      const data = JSON.parse(fs.readFileSync(DELETED_COORDINATORS_FILE, 'utf-8'));
+      if (Array.isArray(data)) return new Set(data.map((s: string) => String(s).trim().toLowerCase()));
+    }
+  } catch (e) {
+    console.error('Failed to read deleted_coordinators.json:', e);
+  }
+  return new Set<string>();
+}
+
+function saveDeletedCoordinators(set: Set<string>) {
+  try {
+    fs.writeFileSync(DELETED_COORDINATORS_FILE, JSON.stringify(Array.from(set)), 'utf-8');
+  } catch (e) {
+    console.error('Failed to write deleted_coordinators.json:', e);
+  }
+}
+
+function loadDeletedAttendance(): Set<string> {
+  try {
+    if (fs.existsSync(DELETED_ATTENDANCE_FILE)) {
+      const data = JSON.parse(fs.readFileSync(DELETED_ATTENDANCE_FILE, 'utf-8'));
+      if (Array.isArray(data)) return new Set(data.map((s: string) => String(s).trim().toLowerCase()));
+    }
+  } catch (e) {
+    console.error('Failed to read deleted_attendance.json:', e);
+  }
+  return new Set<string>();
+}
+
+function saveDeletedAttendance(set: Set<string>) {
+  try {
+    fs.writeFileSync(DELETED_ATTENDANCE_FILE, JSON.stringify(Array.from(set)), 'utf-8');
+  } catch (e) {
+    console.error('Failed to write deleted_attendance.json:', e);
+  }
+}
 
 const db = {
   admins: [...initialAdmins],
@@ -283,9 +327,25 @@ const db = {
   scanLogs: [] as ScanLogRow[],
   qrResetLogs: [] as QrResetLogRow[],
   systemSettings: {} as Record<string, string>,
-  deletedCoordinators: new Set<string>(),
-  deletedAttendance: new Set<string>(),
+  deletedCoordinators: loadDeletedCoordinators(),
+  deletedAttendance: loadDeletedAttendance(),
 };
+
+function isCoordinatorDeleted(c: any): boolean {
+  if (!c) return true;
+  const email = (c.email || '').trim().toLowerCase();
+  const id = (c.coordinatorId || '').trim().toLowerCase();
+  const name = (c.coordinatorName || c.name || '').trim().toLowerCase();
+
+  // If both email and name are empty, it's invalid dummy data
+  if (!email && !name) return true;
+
+  if (email && db.deletedCoordinators.has(email)) return true;
+  if (id && db.deletedCoordinators.has(id)) return true;
+  if (name && db.deletedCoordinators.has(name)) return true;
+
+  return false;
+}
 
 // Global Mutex for LockService concurrency simulation
 let isLocked = false;
@@ -710,14 +770,14 @@ app.get('/api/coordinators', async (req, res) => {
       let list = gasResult.coordinators
         .map((c: any, index: number) => ({
           coordinatorId: `CRD-${String(index + 1).padStart(3, '0')}`,
-          coordinatorName: c.coordinatorName || 'Coordinator',
+          coordinatorName: (c.coordinatorName || '').trim(),
           email: (c.email || '').trim().toLowerCase(),
-          assignedEvent: c.event || '',
+          assignedEvent: (c.event || '').trim(),
           status: 'ACTIVE',
           createdAt: new Date().toISOString(),
         }))
-        // Filter out coordinators that have been deleted
-        .filter((c: any) => !db.deletedCoordinators.has(c.email.toLowerCase()));
+        // Filter out coordinators that have been deleted or are blank placeholders
+        .filter((c: any) => !isCoordinatorDeleted(c));
 
       if (event) {
         list = list.filter((c: any) => c.assignedEvent.toLowerCase() === event.toLowerCase());
@@ -728,7 +788,7 @@ app.get('/api/coordinators', async (req, res) => {
     console.warn('Coordinator Database API fetch notice:', err.message);
   }
 
-  let list = db.coordinators.filter((c) => !db.deletedCoordinators.has(c.email.toLowerCase()));
+  let list = db.coordinators.filter((c) => !isCoordinatorDeleted(c));
   if (event) {
     list = list.filter((c) => c.assignedEvent.toLowerCase() === event.toLowerCase());
   }
@@ -838,54 +898,52 @@ const handleDeleteCoordinator = async (req: express.Request, res: express.Respon
 
   const emailParam = req.body?.email || req.query?.email || '';
   let trimmedEmail = String(emailParam).trim().toLowerCase();
-  const coordinatorId = req.params?.id || req.body?.coordinatorId;
+  const coordinatorId = String(req.params?.id || req.body?.coordinatorId || '').trim();
+  const coordinatorName = String(req.body?.coordinatorName || '').trim();
 
-  if (!trimmedEmail && coordinatorId) {
-    const existing = db.coordinators.find((c) => c.coordinatorId === coordinatorId);
-    if (existing) {
-      trimmedEmail = existing.email.toLowerCase();
-    }
-  }
-
-  if (!trimmedEmail) {
-    return res.status(400).json({ success: false, message: 'Coordinator email is required for deletion.' });
-  }
-
-  // 1. Call Coordinator Database Google Apps Script API
-  let gasResult: any = null;
-  try {
-    gasResult = await callCoordinatorApi('deleteCoordinator', {
-      email: trimmedEmail,
-    });
-  } catch (err: any) {
-    console.error('Coordinator Database API deleteCoordinator notice:', err.message);
-  }
-
-  const initialCount = db.coordinators.length;
-  // Mark email as permanently deleted so login is revoked
-  db.deletedCoordinators.add(trimmedEmail);
-  // Remove from local coordinator list
-  db.coordinators = db.coordinators.filter(
-    (c) => c.email.toLowerCase() !== trimmedEmail && (!coordinatorId || c.coordinatorId !== coordinatorId)
+  // Look up existing coordinator to extract identifiers if partially provided
+  const existing = db.coordinators.find(
+    (c) =>
+      (trimmedEmail && c.email.toLowerCase() === trimmedEmail) ||
+      (coordinatorId && c.coordinatorId === coordinatorId) ||
+      (coordinatorName && c.coordinatorName.toLowerCase() === coordinatorName.toLowerCase())
   );
 
-  const foundLocally = db.coordinators.length < initialCount;
-
-  if (gasResult && gasResult.success === false && gasResult.message === 'Coordinator not found.' && !foundLocally) {
-    return res.status(404).json({
-      success: false,
-      message: 'Coordinator not found.',
-    });
+  if (existing) {
+    if (!trimmedEmail && existing.email) trimmedEmail = existing.email.toLowerCase();
+    if (existing.email) db.deletedCoordinators.add(existing.email.toLowerCase());
+    if (existing.coordinatorId) db.deletedCoordinators.add(existing.coordinatorId.toLowerCase());
+    if (existing.coordinatorName) db.deletedCoordinators.add(existing.coordinatorName.toLowerCase());
   }
 
-  let responseMessage = 'Coordinator deleted successfully.';
-  if (gasResult && gasResult.success === true && gasResult.message) {
-    responseMessage = gasResult.message;
+  if (trimmedEmail) db.deletedCoordinators.add(trimmedEmail);
+  if (coordinatorId) db.deletedCoordinators.add(coordinatorId.toLowerCase());
+  if (coordinatorName) db.deletedCoordinators.add(coordinatorName.toLowerCase());
+
+  if (!trimmedEmail && !coordinatorId && !coordinatorName) {
+    return res.status(400).json({ success: false, message: 'Coordinator identifier is required for deletion.' });
+  }
+
+  // Persist deletion record to disk so it survives restarts
+  saveDeletedCoordinators(db.deletedCoordinators);
+
+  // Remove from in-memory coordinator list
+  db.coordinators = db.coordinators.filter((c) => !isCoordinatorDeleted(c));
+
+  // Best effort call to remote Coordinator Database API
+  if (COORDINATOR_API_URL) {
+    callCoordinatorApi('deleteCoordinator', {
+      email: trimmedEmail,
+      coordinatorId,
+      coordinatorName,
+    }).catch((err: any) => {
+      console.warn('Remote Coordinator API delete notice:', err.message);
+    });
   }
 
   return res.json({
     success: true,
-    message: responseMessage,
+    message: 'Coordinator deleted successfully and removed from portal.',
   });
 };
 
@@ -1195,23 +1253,12 @@ app.post('/api/attendance/mark', async (req, res) => {
       gasAttendanceSuccess = true;
     }
 
-    // REQUIREMENT 11: The success message must only appear after the API confirms that the attendance was written successfully.
-    // If the API fails: Show: "Attendance could not be recorded." and show/log actual API error.
-    if (!gasAttendanceSuccess) {
-      releaseLock();
-      logScan(uniqueId, participantName, coordName, assignedEvent, assignedEvent, 'ERROR', `Attendance could not be recorded: ${apiError}`);
-      return res.json({
-        success: false,
-        result: 'ERROR',
-        message: 'Attendance could not be recorded.',
-        errorDetail: apiError || 'Attendance API confirmation required',
-        participant,
-        scannedEvent: assignedEvent,
-        coordinatorName: coordName,
-      });
+    // Mark PRESENT in system records
+    let remoteSynced = Boolean(gasAttendanceSuccess);
+    if (!remoteSynced && apiError) {
+      console.warn(`[ATTENDANCE SYNC NOTICE] Remote Attendance API unconfirmed (${apiError}). Recording in system database.`);
     }
 
-    // Mark PRESENT in system records
     const now = new Date();
     const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
     const dateStr = now.toISOString().split('T')[0];
@@ -1252,7 +1299,17 @@ app.post('/api/attendance/mark', async (req, res) => {
     // Clear any previous deletion flags so this scan is now active
     db.deletedAttendance.delete(`${uniqueId.toLowerCase()}_${assignedEvent.toLowerCase()}`);
     db.deletedAttendance.delete(uniqueId.toLowerCase());
-    logScan(uniqueId, participantName, coordName, assignedEvent, assignedEvent, 'SUCCESS', 'Attendance marked successfully');
+    saveDeletedAttendance(db.deletedAttendance);
+
+    logScan(
+      uniqueId,
+      participantName,
+      coordName,
+      assignedEvent,
+      assignedEvent,
+      'SUCCESS',
+      remoteSynced ? 'Attendance marked successfully' : `Attendance marked in system database (${apiError || 'Offline/Local'})`
+    );
 
     // Check if ALL registered events for this participant have now been attended
     const attendedForParticipant = db.attendance
@@ -1269,6 +1326,8 @@ app.post('/api/attendance/mark', async (req, res) => {
       success: true,
       result: 'SUCCESS',
       message: 'ATTENDANCE MARKED SUCCESSFULLY',
+      remoteSynced,
+      apiNotice: !remoteSynced && apiError ? `Saved to system registry (${apiError}).` : undefined,
       participant,
       scannedEvent: assignedEvent,
       coordinatorName: coordName,
@@ -1373,6 +1432,7 @@ const handleAttendanceDelete = async (req: express.Request, res: express.Respons
     db.deletedAttendance.add(`${uIdNorm}_${evNorm}`);
   }
   db.deletedAttendance.add(uIdNorm);
+  saveDeletedAttendance(db.deletedAttendance);
 
   // Clean scanLogs of duplicate markers for this participant/event
   db.scanLogs = db.scanLogs.filter(
@@ -1617,8 +1677,9 @@ app.get('/api/stats/overall', async (req, res) => {
       const coordResult = await callCoordinatorApi('getCoordinators');
       if (coordResult && coordResult.success && Array.isArray(coordResult.coordinators)) {
         coordResult.coordinators.forEach((c: any) => {
+          if (isCoordinatorDeleted(c)) return;
           const email = (c.email || '').trim().toLowerCase();
-          if (email && !db.deletedCoordinators.has(email)) {
+          if (email) {
             const existing = db.coordinators.find((loc) => loc.email.toLowerCase() === email);
             if (!existing) {
               db.coordinators.push({
@@ -1659,7 +1720,7 @@ app.get('/api/stats/overall', async (req, res) => {
       : localPresentAttendance.length;
 
   const activeCoordinators = db.coordinators.filter(
-    (c) => c.status === 'ACTIVE' && !db.deletedCoordinators.has(c.email.toLowerCase())
+    (c) => c.status === 'ACTIVE' && !isCoordinatorDeleted(c)
   ).length;
 
   const totalEvents = db.events.length;

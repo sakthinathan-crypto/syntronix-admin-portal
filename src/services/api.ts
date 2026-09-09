@@ -324,11 +324,53 @@ export async function updateEvent(
   };
 }
 
+export function getDeletedCoordinatorsLocal(): Set<string> {
+  try {
+    const raw = localStorage.getItem('syntronix_deleted_coordinators');
+    if (raw) {
+      const arr = JSON.parse(raw);
+      if (Array.isArray(arr)) {
+        return new Set(arr.map((s) => String(s).trim().toLowerCase()));
+      }
+    }
+  } catch {}
+  return new Set<string>();
+}
+
+export function addDeletedCoordinatorLocal(identifiers: (string | undefined | null)[]): void {
+  try {
+    const set = getDeletedCoordinatorsLocal();
+    identifiers.forEach((id) => {
+      if (id && typeof id === 'string' && id.trim()) {
+        set.add(id.trim().toLowerCase());
+      }
+    });
+    localStorage.setItem('syntronix_deleted_coordinators', JSON.stringify(Array.from(set)));
+  } catch {}
+}
+
+export function isCoordinatorDeletedClient(c: any): boolean {
+  if (!c) return true;
+  const email = (c.email || '').trim().toLowerCase();
+  const id = (c.coordinatorId || '').trim().toLowerCase();
+  const name = (c.coordinatorName || c.name || '').trim().toLowerCase();
+
+  // If both email and name are empty, it's invalid dummy data
+  if (!email && !name) return true;
+
+  const deleted = getDeletedCoordinatorsLocal();
+  if (email && deleted.has(email)) return true;
+  if (id && deleted.has(id)) return true;
+  if (name && deleted.has(name)) return true;
+
+  return false;
+}
+
 export async function getCoordinators(event?: string): Promise<CoordinatorUser[]> {
   const url = event ? `${API_BASE}/coordinators?event=${encodeURIComponent(event)}` : `${API_BASE}/coordinators`;
   const { ok, data } = await fetchApiJson(url);
   if (ok && data && Array.isArray(data.coordinators)) {
-    return data.coordinators;
+    return data.coordinators.filter((c: any) => !isCoordinatorDeletedClient(c));
   }
 
   // Direct fallback to Coordinator Database API if backend route returned HTML
@@ -341,14 +383,16 @@ export async function getCoordinators(event?: string): Promise<CoordinatorUser[]
     const gasText = await gasRes.text();
     const gasData = JSON.parse(gasText);
     if (gasData && gasData.success && Array.isArray(gasData.coordinators)) {
-      return gasData.coordinators.map((c: any, index: number) => ({
-        coordinatorId: `CRD-${index + 1}`,
-        coordinatorName: c.coordinatorName || '',
-        email: c.email || '',
-        assignedEvent: c.event || '',
-        status: 'ACTIVE',
-        createdAt: new Date().toISOString(),
-      }));
+      return gasData.coordinators
+        .map((c: any, index: number) => ({
+          coordinatorId: `CRD-${index + 1}`,
+          coordinatorName: (c.coordinatorName || '').trim(),
+          email: (c.email || '').trim().toLowerCase(),
+          assignedEvent: (c.event || '').trim(),
+          status: 'ACTIVE',
+          createdAt: new Date().toISOString(),
+        }))
+        .filter((c: any) => !isCoordinatorDeletedClient(c));
     }
   } catch (err) {
     console.warn('Fallback getCoordinators notice:', err);
@@ -423,8 +467,12 @@ export async function updateCoordinator(
 
 export async function deleteCoordinator(
   email: string,
-  coordinatorId?: string
+  coordinatorId?: string,
+  coordinatorName?: string
 ): Promise<{ success: boolean; message: string }> {
+  // Immediately persist to client-side deleted set
+  addDeletedCoordinatorLocal([email, coordinatorId, coordinatorName]);
+
   const token = localStorage.getItem('syntronix_auth_token');
   const { ok, data } = await fetchApiJson(`${API_BASE}/coordinators/delete`, {
     method: 'POST',
@@ -432,7 +480,7 @@ export async function deleteCoordinator(
       'Content-Type': 'application/json',
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
-    body: JSON.stringify({ email, coordinatorId }),
+    body: JSON.stringify({ email, coordinatorId, coordinatorName }),
   });
   if (ok && data) {
     return data;

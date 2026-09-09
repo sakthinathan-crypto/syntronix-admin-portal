@@ -74,7 +74,8 @@ export const ScanResultModal: React.FC<ScanResultModalProps> = ({
   const isSuccess = resultCode === 'SUCCESS';
   const isAlreadyMarked = resultCode === 'ALREADY_MARKED';
   const isNotRegistered = resultCode === 'NOT_REGISTERED';
-  const isInvalid = resultCode === 'INVALID_QR' || resultCode === 'ERROR';
+  const isInvalid = resultCode === 'INVALID_QR';
+  const isError = resultCode === 'ERROR';
 
   const participantUniqueId = String(
     (participant && (participant.unique_id || participant.uniqueId)) || ''
@@ -106,6 +107,8 @@ export const ScanResultModal: React.FC<ScanResultModalProps> = ({
               ? 'bg-[#FCD34D]'
               : isNotRegistered
               ? 'bg-red-500'
+              : isError
+              ? 'bg-amber-500'
               : 'bg-white/20'
           }`}
         />
@@ -129,6 +132,11 @@ export const ScanResultModal: React.FC<ScanResultModalProps> = ({
                   <XCircle className="w-7 h-7" />
                 </div>
               )}
+              {isError && (
+                <div className="w-12 h-12 rounded-2xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400">
+                  <AlertTriangle className="w-7 h-7" />
+                </div>
+              )}
               {isInvalid && (
                 <div className="w-12 h-12 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center text-white/40">
                   <XCircle className="w-7 h-7" />
@@ -144,12 +152,15 @@ export const ScanResultModal: React.FC<ScanResultModalProps> = ({
                       ? 'text-[#FCD34D]'
                       : isNotRegistered
                       ? 'text-red-400'
+                      : isError
+                      ? 'text-amber-400'
                       : 'text-white'
                   }`}
                 >
                   {isSuccess && '✓ ATTENDANCE MARKED'}
                   {isAlreadyMarked && '⚠ ALREADY MARKED'}
                   {isNotRegistered && 'NOT REGISTERED FOR THIS EVENT'}
+                  {isError && 'ATTENDANCE NOTICE'}
                   {isInvalid && 'INVALID SCAN'}
                 </h3>
                 <p className="text-xs text-white/40 font-mono mt-0.5">
@@ -361,10 +372,17 @@ export const ScanResultModal: React.FC<ScanResultModalProps> = ({
                 </span>
                 <div className="flex flex-wrap gap-1.5">
                   {participant.registeredEvents?.map((ev, i) => {
-                    const isAttended = attendedEvents.some(
-                      (ae) => ae.toLowerCase() === ev.toLowerCase()
-                    );
-                    const isCurrent = ev.toLowerCase() === scannedEvent.toLowerCase();
+                    const normEv = ev.toLowerCase().replace(/[^a-z0-9]/g, '');
+                    const normScanned = scannedEvent.toLowerCase().replace(/[^a-z0-9]/g, '');
+                    const isAttended = attendedEvents.some((ae) => {
+                      const normAe = ae.toLowerCase().replace(/[^a-z0-9]/g, '');
+                      return normAe === normEv || (normAe.startsWith('paperpresent') && normEv.startsWith('paperpresent'));
+                    });
+                    const isCurrent =
+                      ev.toLowerCase() === scannedEvent.toLowerCase() ||
+                      normEv === normScanned ||
+                      (normEv.startsWith('paperpresent') && normScanned.startsWith('paperpresent')) ||
+                      (normEv.startsWith('postermak') && normScanned.startsWith('postermak'));
                     return (
                       <span
                         key={i}
@@ -395,7 +413,7 @@ export const ScanResultModal: React.FC<ScanResultModalProps> = ({
         </div>
 
         {/* Testing Mode: Remove Attendance & Reset QR */}
-        {(isSuccess || isAlreadyMarked) && onRemoveAttendance && participantUniqueId && (
+        {(isSuccess || isAlreadyMarked || Boolean(participantUniqueId)) && onRemoveAttendance && participantUniqueId && (
           <div className="px-6 py-3.5 bg-red-950/20 border-t border-red-500/20">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div className="flex items-start gap-2.5">
