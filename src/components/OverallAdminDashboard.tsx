@@ -20,6 +20,8 @@ import {
   XCircle,
   Award,
   Trash2,
+  UserPlus,
+  Edit3,
 } from 'lucide-react';
 import {
   AdminStats,
@@ -29,6 +31,7 @@ import {
   ScanLog,
   ResetLog,
   AuthSession,
+  ParticipantRecord,
 } from '../types';
 import {
   getAdminStats,
@@ -38,9 +41,15 @@ import {
   getScanLogs,
   getResetLogs,
   deleteCoordinator,
+  deleteAttendanceRecord,
+  getParticipants,
+  addParticipant,
+  updateParticipant,
+  deleteParticipant,
 } from '../services/api';
 import { EventManagementModal } from './EventManagementModal';
 import { ResetAttendanceModal } from './ResetAttendanceModal';
+import { ParticipantModal } from './ParticipantModal';
 
 interface OverallAdminDashboardProps {
   session: AuthSession;
@@ -54,11 +63,12 @@ export const OverallAdminDashboard: React.FC<OverallAdminDashboardProps> = ({
   const adminName = session.user.name;
 
   const [activeTab, setActiveTab] = useState<
-    'overview' | 'events' | 'attendance' | 'coordinators' | 'scan_logs' | 'reset_logs'
+    'overview' | 'events' | 'participants' | 'attendance' | 'coordinators' | 'scan_logs' | 'reset_logs'
   >('overview');
 
   const [stats, setStats] = useState<AdminStats | null>(null);
   const [events, setEvents] = useState<SymposiumEvent[]>([]);
+  const [participants, setParticipants] = useState<ParticipantRecord[]>([]);
   const [attendance, setAttendance] = useState<AttendanceRecord[]>([]);
   const [coordinators, setCoordinators] = useState<CoordinatorUser[]>([]);
   const [scanLogs, setScanLogs] = useState<ScanLog[]>([]);
@@ -76,6 +86,17 @@ export const OverallAdminDashboard: React.FC<OverallAdminDashboardProps> = ({
   // Attendance search & filter
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedFilterEvent, setSelectedFilterEvent] = useState('ALL');
+
+  // Attendance Delete States
+  const [attendanceToDelete, setAttendanceToDelete] = useState<AttendanceRecord | null>(null);
+  const [deletingAttendance, setDeletingAttendance] = useState(false);
+
+  // Participant Management States
+  const [participantSearchQuery, setParticipantSearchQuery] = useState('');
+  const [isParticipantModalOpen, setIsParticipantModalOpen] = useState(false);
+  const [editingParticipant, setEditingParticipant] = useState<ParticipantRecord | null>(null);
+  const [participantToDelete, setParticipantToDelete] = useState<ParticipantRecord | null>(null);
+  const [deletingParticipant, setDeletingParticipant] = useState(false);
 
   // Coordinator Delete States
   const [coordinatorToDelete, setCoordinatorToDelete] = useState<CoordinatorUser | null>(null);
@@ -102,16 +123,75 @@ export const OverallAdminDashboard: React.FC<OverallAdminDashboardProps> = ({
     }
   };
 
+  const handleConfirmDeleteAttendance = async () => {
+    if (!attendanceToDelete) return;
+    try {
+      setDeletingAttendance(true);
+      setDeleteErrorMessage(null);
+      await deleteAttendanceRecord(attendanceToDelete.uniqueId, attendanceToDelete.scannedEvent);
+      setDeleteSuccessMessage(
+        `Attendance record for ${attendanceToDelete.participantName} (${attendanceToDelete.uniqueId}) in ${attendanceToDelete.scannedEvent} deleted. QR is now re-eligible for scanning.`
+      );
+      setAttendanceToDelete(null);
+      await loadAllData();
+      setTimeout(() => {
+        setDeleteSuccessMessage(null);
+      }, 5000);
+    } catch (err: any) {
+      setDeleteErrorMessage(err.message || 'Failed to delete attendance record');
+    } finally {
+      setDeletingAttendance(false);
+    }
+  };
+
+  const handleConfirmDeleteParticipant = async () => {
+    if (!participantToDelete) return;
+    try {
+      setDeletingParticipant(true);
+      setDeleteErrorMessage(null);
+      await deleteParticipant(participantToDelete.uniqueId);
+      setDeleteSuccessMessage(
+        `Participant ${participantToDelete.name} (${participantToDelete.uniqueId}) deleted. Any associated event attendance records were removed and their QR code is re-eligible if re-added.`
+      );
+      setParticipantToDelete(null);
+      await loadAllData();
+      setTimeout(() => {
+        setDeleteSuccessMessage(null);
+      }, 5000);
+    } catch (err: any) {
+      setDeleteErrorMessage(err.message || 'Failed to delete participant');
+    } finally {
+      setDeletingParticipant(false);
+    }
+  };
+
+  const handleSaveParticipant = async (data: any) => {
+    if (editingParticipant) {
+      await updateParticipant(editingParticipant.uniqueId, data);
+      setDeleteSuccessMessage(`Participant ${data.name} updated successfully.`);
+    } else {
+      const created = await addParticipant(data);
+      setDeleteSuccessMessage(`Participant ${created.name} (${created.uniqueId}) registered successfully.`);
+    }
+    setIsParticipantModalOpen(false);
+    setEditingParticipant(null);
+    await loadAllData();
+    setTimeout(() => {
+      setDeleteSuccessMessage(null);
+    }, 5000);
+  };
+
   const loadAllData = async () => {
     try {
       setLoading(true);
-      const [st, ev, att, coords, sLogs, rLogs] = await Promise.all([
+      const [st, ev, att, coords, sLogs, rLogs, parts] = await Promise.all([
         getAdminStats(),
         getEvents(),
         getAttendance(),
         getCoordinators(),
         getScanLogs(),
         getResetLogs(),
+        getParticipants(),
       ]);
       setStats(st);
       setEvents(ev);
@@ -119,6 +199,7 @@ export const OverallAdminDashboard: React.FC<OverallAdminDashboardProps> = ({
       setCoordinators(coords);
       setScanLogs(sLogs);
       setResetLogs(rLogs);
+      setParticipants(parts);
     } catch (err) {
       console.error('Failed to load admin data:', err);
     } finally {
@@ -270,6 +351,18 @@ export const OverallAdminDashboard: React.FC<OverallAdminDashboardProps> = ({
         </button>
 
         <button
+          onClick={() => setActiveTab('participants')}
+          className={`py-2 px-4 rounded-xl text-xs font-mono font-semibold transition-all flex items-center gap-2 ${
+            activeTab === 'participants'
+              ? 'bg-[#F27D26] text-[#070707] font-bold shadow-md shadow-[#F27D26]/20'
+              : 'text-white/40 hover:text-white/80 hover:bg-white/5'
+          }`}
+        >
+          <Users className="w-3.5 h-3.5" />
+          <span>Participants Directory ({participants.length})</span>
+        </button>
+
+        <button
           onClick={() => setActiveTab('attendance')}
           className={`py-2 px-4 rounded-xl text-xs font-mono font-semibold transition-all flex items-center gap-2 ${
             activeTab === 'attendance'
@@ -324,71 +417,85 @@ export const OverallAdminDashboard: React.FC<OverallAdminDashboardProps> = ({
       {activeTab === 'overview' && (
         <div className="space-y-8">
           {/* Top 4 Dashboard Metric Cards */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
-            <div className="p-6 rounded-2xl bg-[#0A0A0A] border border-white/10 shadow-2xl relative overflow-hidden">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-mono uppercase text-white/40 tracking-wider">
-                  Total Participants
-                </span>
-                <div className="w-9 h-9 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center text-white/70">
-                  <Users className="w-4 h-4" />
-                </div>
-              </div>
-              <div className="text-3xl font-black text-white font-['Space_Grotesk'] mt-3">
-                {stats?.totalParticipants || 0}
-              </div>
-              <p className="text-[11px] text-white/40 font-mono mt-1">Unique student IDs</p>
-            </div>
+          {(() => {
+            const techEventsCount = events.filter((e) => e.category === 'TECHNICAL').length;
+            const nonTechEventsCount = events.filter((e) => e.category === 'NON_TECHNICAL').length;
+            const activeCoordsCount = coordinators.filter((c) => c.status === 'ACTIVE').length;
 
-            <div className="p-6 rounded-2xl bg-[#0A0A0A] border border-white/10 shadow-2xl relative overflow-hidden">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-mono uppercase text-white/40 tracking-wider">
-                  Total Attendance
-                </span>
-                <div className="w-9 h-9 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400">
-                  <CalendarCheck className="w-4 h-4" />
+            return (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+                <div className="p-6 rounded-2xl bg-[#0A0A0A] border border-white/10 shadow-2xl relative overflow-hidden">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-mono uppercase text-white/40 tracking-wider">
+                      Total Participants
+                    </span>
+                    <div className="w-9 h-9 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center text-white/70">
+                      <Users className="w-4 h-4" />
+                    </div>
+                  </div>
+                  <div className="text-3xl font-black text-white font-['Space_Grotesk'] mt-3">
+                    {stats?.totalParticipants ?? participants.length}
+                  </div>
+                  <p className="text-[11px] text-white/40 font-mono mt-1">
+                    {participants.length > 0
+                      ? `${participants.length} registered in portal`
+                      : 'Live registration count'}
+                  </p>
                 </div>
-              </div>
-              <div className="text-3xl font-black text-emerald-400 font-['Space_Grotesk'] mt-3">
-                {stats?.totalAttendance || 0}
-              </div>
-              <p className="text-[11px] text-white/40 font-mono mt-1">
-                Verified event attendances
-              </p>
-            </div>
 
-            <div className="p-6 rounded-2xl bg-[#0A0A0A] border border-white/10 shadow-2xl relative overflow-hidden">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-mono uppercase text-white/40 tracking-wider">
-                  Active Coordinators
-                </span>
-                <div className="w-9 h-9 rounded-xl bg-[#F27D26]/10 border border-[#F27D26]/20 flex items-center justify-center text-[#F27D26]">
-                  <Shield className="w-4 h-4" />
+                <div className="p-6 rounded-2xl bg-[#0A0A0A] border border-white/10 shadow-2xl relative overflow-hidden">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-mono uppercase text-white/40 tracking-wider">
+                      Total Attendance
+                    </span>
+                    <div className="w-9 h-9 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400">
+                      <CalendarCheck className="w-4 h-4" />
+                    </div>
+                  </div>
+                  <div className="text-3xl font-black text-emerald-400 font-['Space_Grotesk'] mt-3">
+                    {stats?.totalAttendance ?? attendance.length}
+                  </div>
+                  <p className="text-[11px] text-white/40 font-mono mt-1">
+                    Verified event attendances
+                  </p>
                 </div>
-              </div>
-              <div className="text-3xl font-black text-[#F27D26] font-['Space_Grotesk'] mt-3">
-                {stats?.activeCoordinators || 0}
-              </div>
-              <p className="text-[11px] text-white/40 font-mono mt-1">Across technical & non-tech</p>
-            </div>
 
-            <div className="p-6 rounded-2xl bg-[#0A0A0A] border border-white/10 shadow-2xl relative overflow-hidden">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-mono uppercase text-white/40 tracking-wider">
-                  Total Events
-                </span>
-                <div className="w-9 h-9 rounded-xl bg-[#FCD34D]/10 border border-[#FCD34D]/20 flex items-center justify-center text-[#FCD34D]">
-                  <Layers className="w-4 h-4" />
+                <div className="p-6 rounded-2xl bg-[#0A0A0A] border border-white/10 shadow-2xl relative overflow-hidden">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-mono uppercase text-white/40 tracking-wider">
+                      Active Coordinators
+                    </span>
+                    <div className="w-9 h-9 rounded-xl bg-[#F27D26]/10 border border-[#F27D26]/20 flex items-center justify-center text-[#F27D26]">
+                      <Shield className="w-4 h-4" />
+                    </div>
+                  </div>
+                  <div className="text-3xl font-black text-[#F27D26] font-['Space_Grotesk'] mt-3">
+                    {stats?.activeCoordinators ?? activeCoordsCount}
+                  </div>
+                  <p className="text-[11px] text-white/40 font-mono mt-1">
+                    {activeCoordsCount} of {coordinators.length} active
+                  </p>
+                </div>
+
+                <div className="p-6 rounded-2xl bg-[#0A0A0A] border border-white/10 shadow-2xl relative overflow-hidden">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-mono uppercase text-white/40 tracking-wider">
+                      Total Events
+                    </span>
+                    <div className="w-9 h-9 rounded-xl bg-[#FCD34D]/10 border border-[#FCD34D]/20 flex items-center justify-center text-[#FCD34D]">
+                      <Layers className="w-4 h-4" />
+                    </div>
+                  </div>
+                  <div className="text-3xl font-black text-[#FCD34D] font-['Space_Grotesk'] mt-3">
+                    {stats?.totalEvents ?? events.length}
+                  </div>
+                  <p className="text-[11px] text-white/40 font-mono mt-1">
+                    {techEventsCount} Technical + {nonTechEventsCount} Non-Technical
+                  </p>
                 </div>
               </div>
-              <div className="text-3xl font-black text-[#FCD34D] font-['Space_Grotesk'] mt-3">
-                {stats?.totalEvents || 5}
-              </div>
-              <p className="text-[11px] text-white/40 font-mono mt-1">
-                2 Technical + 3 Non-Technical
-              </p>
-            </div>
-          </div>
+            );
+          })()}
 
           {/* Event-wise Attendance Statistics & Recent Scans */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -576,6 +683,172 @@ export const OverallAdminDashboard: React.FC<OverallAdminDashboardProps> = ({
       )}
 
       {/* ============================================================ */}
+      {/* SUBVIEW 2.5: PARTICIPANTS DIRECTORY (CRUD) */}
+      {/* ============================================================ */}
+      {activeTab === 'participants' && (
+        <div className="rounded-2xl bg-[#0A0A0A] border border-white/10 p-6 shadow-2xl space-y-5">
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4">
+            <div>
+              <h3 className="text-base font-bold text-white font-['Space_Grotesk']">
+                Participants Directory
+              </h3>
+              <p className="text-xs text-white/40 font-mono">
+                Total Registered: {participants.length} | Manage participant records, registration data & event eligibility
+              </p>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                id="btn-add-participant"
+                onClick={() => {
+                  setEditingParticipant(null);
+                  setIsParticipantModalOpen(true);
+                }}
+                className="py-2.5 px-4 rounded-xl font-mono text-xs font-bold text-[#070707] bg-[#F27D26] hover:opacity-90 active:scale-95 shadow-lg shadow-[#F27D26]/20 transition-all flex items-center gap-2"
+              >
+                <UserPlus className="w-4 h-4" />
+                <span>ADD PARTICIPANT</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Search bar */}
+          <div className="relative flex-1 max-w-md">
+            <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-white/40" />
+            <input
+              type="text"
+              value={participantSearchQuery}
+              onChange={(e) => setParticipantSearchQuery(e.target.value)}
+              placeholder="Search by ID, Name, Reg No, College, Event..."
+              className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-white/5 border border-white/10 text-xs text-white placeholder-white/40 focus:outline-none focus:border-[#F27D26] font-mono"
+            />
+          </div>
+
+          {deleteSuccessMessage && (
+            <div className="p-3.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-xs font-mono text-emerald-400 flex items-center justify-between animate-in fade-in duration-200">
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                <span>{deleteSuccessMessage}</span>
+              </div>
+              <button
+                onClick={() => setDeleteSuccessMessage(null)}
+                className="text-white/40 hover:text-white"
+              >
+                <XCircle className="w-4 h-4" />
+              </button>
+            </div>
+          )}
+
+          {/* Participants Table */}
+          {(() => {
+            const q = participantSearchQuery.toLowerCase().trim();
+            const filteredParticipants = participants.filter((p) => {
+              if (!q) return true;
+              return (
+                p.uniqueId.toLowerCase().includes(q) ||
+                p.name.toLowerCase().includes(q) ||
+                (p.registrationNo && p.registrationNo.toLowerCase().includes(q)) ||
+                (p.college && p.college.toLowerCase().includes(q)) ||
+                (p.department && p.department.toLowerCase().includes(q)) ||
+                (p.email && p.email.toLowerCase().includes(q)) ||
+                (p.mobile && p.mobile.includes(q)) ||
+                (Array.isArray(p.selectedEvents) &&
+                  p.selectedEvents.some((ev) => ev.toLowerCase().includes(q)))
+              );
+            });
+
+            return (
+              <div className="overflow-x-auto rounded-xl border border-white/10">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-white/5 text-white/40 font-mono uppercase text-[10px] border-b border-white/10">
+                    <tr>
+                      <th className="py-3 px-4">Unique ID</th>
+                      <th className="py-3 px-4">Participant Name</th>
+                      <th className="py-3 px-4">University Reg No</th>
+                      <th className="py-3 px-4">College / Dept</th>
+                      <th className="py-3 px-4">Email / Mobile</th>
+                      <th className="py-3 px-4">Registered Events</th>
+                      <th className="py-3 px-4 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-white/5 font-mono">
+                    {filteredParticipants.map((p) => (
+                      <tr key={p.uniqueId} className="hover:bg-white/[0.03] transition-colors">
+                        <td className="py-3 px-4 font-bold text-[#F27D26]">{p.uniqueId}</td>
+                        <td className="py-3 px-4 font-sans font-medium text-white">{p.name}</td>
+                        <td className="py-3 px-4 text-white/50">{p.registrationNo || '—'}</td>
+                        <td className="py-3 px-4 text-white/50 truncate max-w-[180px]" title={`${p.college} (${p.department})`}>
+                          {p.college ? `${p.college}` : '—'}
+                          {p.department && <span className="text-white/30 text-[10px] block">{p.department}</span>}
+                        </td>
+                        <td className="py-3 px-4 text-white/50 text-[11px]">
+                          <div>{p.email || '—'}</div>
+                          <div className="text-white/30">{p.mobile || ''}</div>
+                        </td>
+                        <td className="py-3 px-4">
+                          <div className="flex flex-wrap gap-1 max-w-[200px]">
+                            {Array.isArray(p.selectedEvents) && p.selectedEvents.length > 0 ? (
+                              p.selectedEvents.map((evName, idx) => (
+                                <span
+                                  key={idx}
+                                  className="px-1.5 py-0.5 rounded text-[10px] bg-white/5 text-white/70 border border-white/10 truncate max-w-[140px]"
+                                  title={evName}
+                                >
+                                  {evName}
+                                </span>
+                              ))
+                            ) : (
+                              <span className="text-white/30 text-[10px]">None</span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="py-3 px-4 text-right">
+                          <div className="flex items-center justify-end gap-2">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEditingParticipant(p);
+                                setIsParticipantModalOpen(true);
+                              }}
+                              className="text-white/40 hover:text-white p-1 rounded hover:bg-white/5 transition-colors"
+                              title={`Edit ${p.name}`}
+                            >
+                              <Edit3 className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setDeleteErrorMessage(null);
+                                setParticipantToDelete(p);
+                              }}
+                              className="text-red-400 hover:text-red-300 p-1 rounded hover:bg-red-500/10 transition-colors"
+                              title={`Delete ${p.name}`}
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                    {filteredParticipants.length === 0 && (
+                      <tr>
+                        <td colSpan={7} className="py-8 text-center text-white/40 font-mono">
+                          {participants.length === 0
+                            ? 'No participants registered yet. Click "Add Participant" to register the first participant.'
+                            : 'No participants match your search filter.'}
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            );
+          })()}
+        </div>
+      )}
+
+      {/* ============================================================ */}
       {/* SUBVIEW 3: ATTENDANCE REGISTRY */}
       {/* ============================================================ */}
       {activeTab === 'attendance' && (
@@ -620,6 +893,21 @@ export const OverallAdminDashboard: React.FC<OverallAdminDashboardProps> = ({
             </div>
           </div>
 
+          {deleteSuccessMessage && (
+            <div className="p-3.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-xs font-mono text-emerald-400 flex items-center justify-between animate-in fade-in duration-200">
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                <span>{deleteSuccessMessage}</span>
+              </div>
+              <button
+                onClick={() => setDeleteSuccessMessage(null)}
+                className="text-white/40 hover:text-white"
+              >
+                <XCircle className="w-4 h-4" />
+              </button>
+            </div>
+          )}
+
           {/* Table */}
           <div className="overflow-x-auto rounded-xl border border-white/10">
             <table className="w-full text-left text-xs">
@@ -633,7 +921,7 @@ export const OverallAdminDashboard: React.FC<OverallAdminDashboardProps> = ({
                   <th className="py-3 px-4">Coordinator</th>
                   <th className="py-3 px-4">Time</th>
                   <th className="py-3 px-4">Status</th>
-                  <th className="py-3 px-4 text-right">Admin Action</th>
+                  <th className="py-3 px-4 text-right">Admin Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-white/5 font-mono">
@@ -656,14 +944,29 @@ export const OverallAdminDashboard: React.FC<OverallAdminDashboardProps> = ({
                       </span>
                     </td>
                     <td className="py-3 px-4 text-right">
-                      <button
-                        onClick={() => handleOpenResetForRecord(rec.uniqueId, rec.scannedEvent)}
-                        className="text-white/40 hover:text-red-400 text-xs font-mono flex items-center gap-1 ml-auto"
-                        title="Reset QR Attendance state for this participant"
-                      >
-                        <RotateCcw className="w-3 h-3" />
-                        <span>Reset</span>
-                      </button>
+                      <div className="flex items-center justify-end gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setDeleteErrorMessage(null);
+                            setAttendanceToDelete(rec);
+                          }}
+                          className="text-red-400 hover:text-red-300 text-xs font-mono flex items-center gap-1 px-2 py-1 rounded bg-red-500/10 hover:bg-red-500/20 transition-colors"
+                          title="Delete attendance record and re-enable QR code for scanning"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                          <span>Delete</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleOpenResetForRecord(rec.uniqueId, rec.scannedEvent)}
+                          className="text-white/40 hover:text-white text-xs font-mono flex items-center gap-1 px-2 py-1 rounded bg-white/5 hover:bg-white/10 transition-colors"
+                          title="Reset QR Attendance state for this participant with audit log"
+                        >
+                          <RotateCcw className="w-3 h-3" />
+                          <span>Reset</span>
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -676,6 +979,174 @@ export const OverallAdminDashboard: React.FC<OverallAdminDashboardProps> = ({
                 )}
               </tbody>
             </table>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Attendance Confirmation Dialog */}
+      {attendanceToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-in fade-in duration-150">
+          <div className="relative w-full max-w-md bg-[#0A0A0A] border border-white/10 rounded-2xl p-6 shadow-2xl space-y-4">
+            <div className="flex items-start gap-3.5">
+              <div className="w-10 h-10 rounded-xl bg-red-500/10 border border-red-500/20 flex items-center justify-center text-red-400 shrink-0">
+                <AlertTriangle className="w-5 h-5" />
+              </div>
+              <div>
+                <h4 className="text-base font-bold text-white font-['Space_Grotesk']">
+                  Delete Attendance Record
+                </h4>
+                <p className="text-xs text-white/60 mt-0.5">
+                  Are you sure you want to delete this verified attendance record?
+                </p>
+              </div>
+            </div>
+
+            <div className="p-3.5 rounded-xl bg-white/5 border border-white/10 space-y-1.5 text-xs font-mono">
+              <div className="flex justify-between">
+                <span className="text-white/40">Participant:</span>
+                <span className="text-white font-semibold">{attendanceToDelete.participantName}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-white/40">Unique ID:</span>
+                <span className="text-[#F27D26] font-semibold">{attendanceToDelete.uniqueId}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-white/40">Event:</span>
+                <span className="text-white font-semibold">{attendanceToDelete.scannedEvent}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-white/40">Attendance Time:</span>
+                <span className="text-white/60">{attendanceToDelete.attendanceTime}</span>
+              </div>
+            </div>
+
+            <p className="text-[11px] text-white/40 font-mono leading-relaxed">
+              This action will decrease the Total Attendance count and immediately re-enable this participant's QR code for scanning in {attendanceToDelete.scannedEvent}.
+            </p>
+
+            {deleteErrorMessage && (
+              <div className="p-2.5 rounded-xl bg-red-500/10 border border-red-500/20 text-xs text-red-400 font-mono flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 shrink-0" />
+                <span>{deleteErrorMessage}</span>
+              </div>
+            )}
+
+            <div className="flex items-center justify-end gap-3 pt-2">
+              <button
+                type="button"
+                disabled={deletingAttendance}
+                onClick={() => {
+                  setAttendanceToDelete(null);
+                  setDeleteErrorMessage(null);
+                }}
+                className="px-4 py-2 rounded-xl text-xs font-mono text-white/60 hover:text-white transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                id="btn-confirm-delete-attendance"
+                disabled={deletingAttendance}
+                onClick={handleConfirmDeleteAttendance}
+                className="px-5 py-2 rounded-xl font-mono text-xs font-bold text-white bg-red-600 hover:bg-red-500 shadow-lg shadow-red-600/20 active:scale-95 transition-all flex items-center gap-1.5"
+              >
+                {deletingAttendance ? (
+                  <>
+                    <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    <span>Deleting...</span>
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>CONFIRM DELETE ATTENDANCE</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Participant Confirmation Dialog */}
+      {participantToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-in fade-in duration-150">
+          <div className="relative w-full max-w-md bg-[#0A0A0A] border border-white/10 rounded-2xl p-6 shadow-2xl space-y-4">
+            <div className="flex items-start gap-3.5">
+              <div className="w-10 h-10 rounded-xl bg-red-500/10 border border-red-500/20 flex items-center justify-center text-red-400 shrink-0">
+                <AlertTriangle className="w-5 h-5" />
+              </div>
+              <div>
+                <h4 className="text-base font-bold text-white font-['Space_Grotesk']">
+                  Delete Participant
+                </h4>
+                <p className="text-xs text-white/60 mt-0.5">
+                  Are you sure you want to delete this participant?
+                </p>
+              </div>
+            </div>
+
+            <div className="p-3.5 rounded-xl bg-white/5 border border-white/10 space-y-1.5 text-xs font-mono">
+              <div className="flex justify-between">
+                <span className="text-white/40">Name:</span>
+                <span className="text-white font-semibold">{participantToDelete.name}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-white/40">Unique ID:</span>
+                <span className="text-[#F27D26] font-semibold">{participantToDelete.uniqueId}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-white/40">Reg No:</span>
+                <span className="text-white/80">{participantToDelete.registrationNo}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-white/40">College:</span>
+                <span className="text-white/60 truncate max-w-[200px]">{participantToDelete.college || '—'}</span>
+              </div>
+            </div>
+
+            <p className="text-[11px] text-white/40 font-mono leading-relaxed">
+              Deleting this participant will permanently remove their registration and any event attendance records associated with them. If added back later, their QR code will become re-eligible for scanning.
+            </p>
+
+            {deleteErrorMessage && (
+              <div className="p-2.5 rounded-xl bg-red-500/10 border border-red-500/20 text-xs text-red-400 font-mono flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 shrink-0" />
+                <span>{deleteErrorMessage}</span>
+              </div>
+            )}
+
+            <div className="flex items-center justify-end gap-3 pt-2">
+              <button
+                type="button"
+                disabled={deletingParticipant}
+                onClick={() => {
+                  setParticipantToDelete(null);
+                  setDeleteErrorMessage(null);
+                }}
+                className="px-4 py-2 rounded-xl text-xs font-mono text-white/60 hover:text-white transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                id="btn-confirm-delete-participant"
+                disabled={deletingParticipant}
+                onClick={handleConfirmDeleteParticipant}
+                className="px-5 py-2 rounded-xl font-mono text-xs font-bold text-white bg-red-600 hover:bg-red-500 shadow-lg shadow-red-600/20 active:scale-95 transition-all flex items-center gap-1.5"
+              >
+                {deletingParticipant ? (
+                  <>
+                    <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    <span>Deleting...</span>
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>CONFIRM DELETE PARTICIPANT</span>
+                  </>
+                )}
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -993,6 +1464,18 @@ export const OverallAdminDashboard: React.FC<OverallAdminDashboardProps> = ({
         initialEvent={resetInitialEvent}
         onClose={() => setIsResetModalOpen(false)}
         onResetSuccess={loadAllData}
+      />
+
+      {/* Participant Add/Edit Modal */}
+      <ParticipantModal
+        isOpen={isParticipantModalOpen}
+        editingParticipant={editingParticipant}
+        availableEvents={events}
+        onClose={() => {
+          setIsParticipantModalOpen(false);
+          setEditingParticipant(null);
+        }}
+        onSave={handleSaveParticipant}
       />
     </div>
   );

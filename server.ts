@@ -113,8 +113,20 @@ interface ScanLogRow {
   coordinatorName: string;
   coordinatorAssignedEvent: string;
   scannedEvent: string;
-  result: 'SUCCESS' | 'ALREADY_MARKED' | 'NOT_REGISTERED' | 'INVALID_QR' | 'UNAUTHORIZED' | 'ERROR';
+  result: 'SUCCESS' | 'ALREADY_MARKED' | 'NOT_REGISTERED' | 'INVALID_QR' | 'UNAUTHORIZED' | 'REVOKED' | 'ERROR';
   message: string;
+}
+
+interface ParticipantRow {
+  uniqueId: string;
+  name: string;
+  registrationNo: string;
+  college: string;
+  department: string;
+  email: string;
+  mobile: string;
+  selectedEvents: string[];
+  createdAt: string;
 }
 
 interface QrResetLogRow {
@@ -259,16 +271,20 @@ const initialCoordinators: CoordinatorRow[] = [
 ];
 
 // In-Memory Database Store
+let ATTENDANCE_API_KEY = process.env.ATTENDANCE_API_KEY || '';
+
 const db = {
   admins: [...initialAdmins],
   coordinators: [...initialCoordinators],
   events: [...initialEvents],
+  participants: [] as ParticipantRow[],
   jury: [] as JuryRow[],
   attendance: [] as AttendanceRow[],
   scanLogs: [] as ScanLogRow[],
   qrResetLogs: [] as QrResetLogRow[],
   systemSettings: {} as Record<string, string>,
   deletedCoordinators: new Set<string>(),
+  deletedAttendance: new Set<string>(),
 };
 
 // Global Mutex for LockService concurrency simulation
@@ -344,24 +360,32 @@ async function callAttendanceApiPost(action: string, payload: Record<string, any
   try {
     const bodyObj: Record<string, any> = {
       action,
+      apiKey: ATTENDANCE_API_KEY || undefined,
+      key: ATTENDANCE_API_KEY || undefined,
       ...payload,
     };
-    const res = await fetch(ATTENDANCE_API_URL, {
+    let targetUrl = ATTENDANCE_API_URL;
+    if (ATTENDANCE_API_KEY) {
+      const sep = targetUrl.includes('?') ? '&' : '?';
+      targetUrl = `${targetUrl}${sep}apiKey=${encodeURIComponent(ATTENDANCE_API_KEY)}&key=${encodeURIComponent(ATTENDANCE_API_KEY)}`;
+    }
+    const res = await fetch(targetUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(bodyObj),
       redirect: 'follow',
+      signal: AbortSignal.timeout(30000),
     });
     if (!res.ok) {
-      throw new Error(`Attendance API returned status ${res.status}`);
+      throw new Error(`Attendance API returned HTTP ${res.status}`);
     }
     const data = await res.json();
     return data;
   } catch (err: any) {
     console.error('Attendance API POST notice:', err.message);
-    return null;
+    return { success: false, error: err.message };
   }
 }
 
@@ -384,6 +408,7 @@ app.get('/api/config', (req, res) => {
   res.json({
     coordinatorApiUrl: COORDINATOR_API_URL,
     attendanceApiUrl: ATTENDANCE_API_URL,
+    attendanceApiKeyConfigured: Boolean(ATTENDANCE_API_KEY),
     isCustomGasConfigured: Boolean(COORDINATOR_API_URL && ATTENDANCE_API_URL),
     adminAccessKeyConfigured: true,
     connectionStatus: 'CONNECTED',
@@ -392,12 +417,15 @@ app.get('/api/config', (req, res) => {
 });
 
 app.post('/api/config/update', (req, res) => {
-  const { coordinatorApiUrl, attendanceApiUrl } = req.body;
+  const { coordinatorApiUrl, attendanceApiUrl, attendanceApiKey } = req.body;
   if (coordinatorApiUrl !== undefined) {
     COORDINATOR_API_URL = coordinatorApiUrl.trim();
   }
   if (attendanceApiUrl !== undefined) {
     ATTENDANCE_API_URL = attendanceApiUrl.trim();
+  }
+  if (attendanceApiKey !== undefined) {
+    ATTENDANCE_API_KEY = attendanceApiKey.trim();
   }
   res.json({
     success: true,
@@ -405,6 +433,7 @@ app.post('/api/config/update', (req, res) => {
     config: {
       coordinatorApiUrl: COORDINATOR_API_URL,
       attendanceApiUrl: ATTENDANCE_API_URL,
+      attendanceApiKeyConfigured: Boolean(ATTENDANCE_API_KEY),
     },
   });
 });
@@ -980,14 +1009,42 @@ function parseSelectedEvents(rawEvents: any): string[] {
 
 // 7. QR CODE ATTENDANCE MARKING WITH STRICT CHECKS & LOCK
 app.post('/api/attendance/mark', async (req, res) => {
-  const { participant, coordinatorName, coordinatorAssignedEvent } = req.body;
+  const { participant, coordinatorName, coordinatorAssignedEvent, coordinatorEmail } = req.body;
 
   const uniqueId = String(
     (participant && (participant.unique_id || participant.uniqueId)) || ''
   ).trim();
 
+  const participantName = String(participant?.name || '').trim();
+  const assignedEvent = (coordinatorAssignedEvent || '').trim();
+  const coordName = coordinatorName || 'Coordinator';
+  const coordEmail = String(coordinatorEmail || '').trim().toLowerCase();
+
+  // 1. COORDINATOR VERIFICATION & ACTIVE STATUS CHECK
+  const matchedCoord = db.coordinators.find(
+    (c) =>
+      (coordEmail && c.email.toLowerCase() === coordEmail) ||
+      (coordName && c.coordinatorName.toLowerCase() === coordName.toLowerCase()) ||
+      (coordName && c.email.toLowerCase() === coordName.toLowerCase())
+  );
+
+  const isCoordinatorRevoked =
+    (matchedCoord && matchedCoord.status !== 'ACTIVE') ||
+    (matchedCoord && db.deletedCoordinators.has(matchedCoord.email.toLowerCase())) ||
+    (coordEmail && db.deletedCoordinators.has(coordEmail)) ||
+    (coordName && db.deletedCoordinators.has(coordName.toLowerCase()));
+
+  if (isCoordinatorRevoked) {
+    logScan(uniqueId || '', participantName || 'Unknown', coordName, assignedEvent, assignedEvent, 'REVOKED', 'Coordinator access revoked');
+    return res.status(403).json({
+      success: false,
+      result: 'REVOKED',
+      message: 'Coordinator access revoked.',
+    });
+  }
+
   if (!participant || !uniqueId || uniqueId === 'INVALID_PAYLOAD') {
-    logScan('', 'Unknown', coordinatorName || '', coordinatorAssignedEvent || '', coordinatorAssignedEvent || '', 'INVALID_QR', 'Missing or invalid participant details in QR');
+    logScan('', 'Unknown', coordName, assignedEvent, assignedEvent, 'INVALID_QR', 'Missing or invalid participant details in QR');
     res.json({
       success: false,
       result: 'INVALID_QR',
@@ -996,15 +1053,11 @@ app.post('/api/attendance/mark', async (req, res) => {
     return;
   }
 
-  const participantName = String(participant.name || '').trim();
-  const assignedEvent = (coordinatorAssignedEvent || '').trim();
-  const coordName = coordinatorName || 'Coordinator';
-
   // Registered Events from selectedEvents or registeredEvents
   const rawEvents = participant.selectedEvents || participant.registeredEvents;
   const registeredEvents = parseSelectedEvents(rawEvents);
 
-  // STEP 4 & 5: Check whether the participant registered for that event
+  // 2. CHECK WHETHER PARTICIPANT REGISTERED FOR THIS EVENT
   const isRegistered = isParticipantRegisteredForEvent(registeredEvents, assignedEvent);
 
   if (!isRegistered) {
@@ -1012,7 +1065,7 @@ app.post('/api/attendance/mark', async (req, res) => {
     res.json({
       success: false,
       result: 'NOT_REGISTERED',
-      message: 'PARTICIPANT FOUND — NOT REGISTERED FOR THIS EVENT',
+      message: 'Participant not registered for this event.',
       participant,
       scannedEvent: assignedEvent,
       coordinatorName: coordName,
@@ -1032,7 +1085,7 @@ app.post('/api/attendance/mark', async (req, res) => {
   }
 
   try {
-    // Check UNIQUE ID + EVENT duplicate locally first
+    // 3. CHECK WHETHER ATTENDANCE ALREADY MARKED FOR THIS EVENT
     const existing = db.attendance.find(
       (a) =>
         a.uniqueId.toLowerCase() === uniqueId.toLowerCase() &&
@@ -1047,7 +1100,7 @@ app.post('/api/attendance/mark', async (req, res) => {
       res.json({
         success: false,
         result: 'ALREADY_MARKED',
-        message: 'EVENT ATTENDANCE ALREADY USED / MARKED',
+        message: 'Already Marked',
         participant,
         scannedEvent: assignedEvent,
         coordinatorName: coordName,
@@ -1060,59 +1113,105 @@ app.post('/api/attendance/mark', async (req, res) => {
       return;
     }
 
-    // Call Attendance API for QR scan validation and recording
+    // 4. RECORD ATTENDANCE VIA ATTENDANCE API
     let gasAttendanceSuccess = false;
-    try {
-      const gasResult = await callAttendanceApiPost('markAttendance', {
-        action: 'markAttendance',
-        participant: { ...participant, unique_id: uniqueId, uniqueId, registeredEvents },
-        uniqueId,
-        unique_id: uniqueId,
-        name: participantName,
-        registrationNo: participant.registrationNo || participant.universityRegistrationNumber || '',
-        universityRegNumber: participant.registrationNo || participant.universityRegistrationNumber || '',
-        email: participant.email || '',
-        mobile: participant.mobile || participant.mobileNumber || '',
-        college: participant.college || participant.collegeName || '',
-        department: participant.department || '',
-        fieldOfStudy: participant.fieldOfStudy || '',
-        teamName: participant.teamName || '',
-        leaderName: participant.leaderName || '',
-        members: participant.members || participant.membersName || '',
-        degree: participant.degree || '',
-        year: participant.year || '',
-        collegeLocation: participant.collegeLocation || '',
-        teamLeaderEmail: participant.teamLeaderEmail || '',
-        member1Mobile: participant.member1Mobile || '',
-        member2Mobile: participant.member2Mobile || '',
-        selectedEvents: participant.selectedEvents || registeredEvents.join(', '),
-        registeredEvents,
-        scannedEvent: assignedEvent,
-        event: assignedEvent,
-        coordinatorName: coordName,
-        scannedAt: new Date().toISOString(),
-      });
+    let apiError: string | null = null;
+    let remotePreviousScan: any = null;
 
-      if (gasResult) {
-        if (gasResult.result === 'ALREADY_MARKED' || (gasResult.success === false && gasResult.error === 'ALREADY_MARKED')) {
-          logScan(uniqueId, participantName, coordName, assignedEvent, assignedEvent, 'ALREADY_MARKED', 'Duplicate detected by Attendance API');
-          releaseLock();
-          return res.json({
-            ...gasResult,
-            participant,
-            scannedEvent: assignedEvent,
-            coordinatorName: coordName,
-          });
+    if (ATTENDANCE_API_URL) {
+      try {
+        const gasResult = await callAttendanceApiPost('markAttendance', {
+          action: 'markAttendance',
+          participant: { ...participant, unique_id: uniqueId, uniqueId, registeredEvents },
+          uniqueId,
+          unique_id: uniqueId,
+          name: participantName,
+          registrationNo: participant.registrationNo || participant.universityRegistrationNumber || '',
+          universityRegNumber: participant.registrationNo || participant.universityRegistrationNumber || '',
+          email: participant.email || '',
+          mobile: participant.mobile || participant.mobileNumber || '',
+          college: participant.college || participant.collegeName || '',
+          department: participant.department || '',
+          fieldOfStudy: participant.fieldOfStudy || '',
+          teamName: participant.teamName || '',
+          leaderName: participant.leaderName || '',
+          members: participant.members || participant.membersName || '',
+          degree: participant.degree || '',
+          year: participant.year || '',
+          collegeLocation: participant.collegeLocation || '',
+          teamLeaderEmail: participant.teamLeaderEmail || '',
+          member1Mobile: participant.member1Mobile || '',
+          member2Mobile: participant.member2Mobile || '',
+          selectedEvents: participant.selectedEvents || registeredEvents.join(', '),
+          registeredEvents,
+          scannedEvent: assignedEvent,
+          event: assignedEvent,
+          coordinatorName: coordName,
+          scannedAt: new Date().toISOString(),
+        });
+
+        if (gasResult) {
+          if (gasResult.result === 'ALREADY_MARKED' || (gasResult.success === false && gasResult.error === 'ALREADY_MARKED')) {
+            const isPreviouslyDeleted =
+              db.deletedAttendance.has(`${uniqueId.toLowerCase()}_${assignedEvent.toLowerCase()}`) ||
+              db.deletedAttendance.has(uniqueId.toLowerCase());
+
+            if (!isPreviouslyDeleted) {
+              remotePreviousScan = gasResult.previousScan;
+              logScan(uniqueId, participantName, coordName, assignedEvent, assignedEvent, 'ALREADY_MARKED', 'Duplicate detected by Attendance API');
+              releaseLock();
+              return res.json({
+                success: false,
+                result: 'ALREADY_MARKED',
+                message: 'Already Marked',
+                participant,
+                scannedEvent: assignedEvent,
+                coordinatorName: coordName,
+                previousScan: remotePreviousScan || {
+                  coordinatorName: 'System Registry',
+                  scanTime: new Date().toLocaleTimeString(),
+                  scannedEvent: assignedEvent,
+                },
+              });
+            } else {
+              // Participant was explicitly removed in testing mode, allow re-scan
+              gasAttendanceSuccess = true;
+            }
+          }
+
+          if (gasResult.success === true) {
+            gasAttendanceSuccess = true;
+          } else {
+            apiError = gasResult.error || gasResult.message || 'Attendance API authorization or execution failed';
+          }
+        } else {
+          apiError = 'No response returned by Attendance API';
         }
-        if (gasResult.success) {
-          gasAttendanceSuccess = true;
-        }
+      } catch (apiErr: any) {
+        apiError = apiErr.message || 'Attendance API network communication error';
       }
-    } catch (apiErr: any) {
-      console.warn('Attendance API call notice:', apiErr.message);
+    } else {
+      // If no remote URL configured, proceed with local confirmation
+      gasAttendanceSuccess = true;
     }
 
-    // Mark PRESENT
+    // REQUIREMENT 11: The success message must only appear after the API confirms that the attendance was written successfully.
+    // If the API fails: Show: "Attendance could not be recorded." and show/log actual API error.
+    if (!gasAttendanceSuccess) {
+      releaseLock();
+      logScan(uniqueId, participantName, coordName, assignedEvent, assignedEvent, 'ERROR', `Attendance could not be recorded: ${apiError}`);
+      return res.json({
+        success: false,
+        result: 'ERROR',
+        message: 'Attendance could not be recorded.',
+        errorDetail: apiError || 'Attendance API confirmation required',
+        participant,
+        scannedEvent: assignedEvent,
+        coordinatorName: coordName,
+      });
+    }
+
+    // Mark PRESENT in system records
     const now = new Date();
     const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
     const dateStr = now.toISOString().split('T')[0];
@@ -1150,6 +1249,9 @@ app.post('/api/attendance/mark', async (req, res) => {
     };
 
     db.attendance.push(record);
+    // Clear any previous deletion flags so this scan is now active
+    db.deletedAttendance.delete(`${uniqueId.toLowerCase()}_${assignedEvent.toLowerCase()}`);
+    db.deletedAttendance.delete(uniqueId.toLowerCase());
     logScan(uniqueId, participantName, coordName, assignedEvent, assignedEvent, 'SUCCESS', 'Attendance marked successfully');
 
     // Check if ALL registered events for this participant have now been attended
@@ -1217,13 +1319,25 @@ app.get('/api/attendance', async (req, res) => {
 
     const gasResult = await callAttendanceApiGet('attendance', queryParams);
     if (gasResult && gasResult.success && Array.isArray(gasResult.attendance) && gasResult.attendance.length > 0) {
-      return res.json({ success: true, attendance: gasResult.attendance });
+      const filteredGas = gasResult.attendance.filter((a: any) => {
+        const uId = String(a.uniqueId || a.unique_id || '').trim().toLowerCase();
+        const ev = String(a.scannedEvent || a.event || '').trim().toLowerCase();
+        if (db.deletedAttendance.has(`${uId}_${ev}`) || db.deletedAttendance.has(uId)) {
+          return false;
+        }
+        return true;
+      });
+      return res.json({ success: true, attendance: filteredGas });
     }
   } catch (err: any) {
     console.warn('Attendance API query notice:', err.message);
   }
 
-  let list = db.attendance;
+  let list = db.attendance.filter((a) => {
+    const uId = a.uniqueId.toLowerCase();
+    const ev = a.scannedEvent.toLowerCase();
+    return !db.deletedAttendance.has(`${uId}_${ev}`) && !db.deletedAttendance.has(uId);
+  });
   if (event) {
     list = list.filter((a) => a.scannedEvent.toLowerCase() === event.toLowerCase());
   }
@@ -1232,6 +1346,201 @@ app.get('/api/attendance', async (req, res) => {
   }
 
   res.json({ success: true, attendance: list });
+});
+
+// Delete Attendance Record (Re-enables QR scanning)
+const handleAttendanceDelete = async (req: express.Request, res: express.Response) => {
+  const uniqueId = String(req.body?.uniqueId || req.query?.uniqueId || '').trim();
+  const event = String(req.body?.event || req.query?.event || '').trim();
+
+  if (!uniqueId) {
+    return res.status(400).json({ success: false, message: 'Participant unique ID is required to delete attendance.' });
+  }
+
+  const initialCount = db.attendance.length;
+  db.attendance = db.attendance.filter((a) => {
+    if (a.uniqueId.toLowerCase() !== uniqueId.toLowerCase()) return true;
+    if (event && a.scannedEvent.toLowerCase() !== event.toLowerCase()) return true;
+    return false;
+  });
+
+  const deletedCount = initialCount - db.attendance.length;
+
+  // Track deletion so Google Sheets cached reads or subsequent checks do not treat as marked
+  const uIdNorm = uniqueId.toLowerCase();
+  const evNorm = event.toLowerCase();
+  if (evNorm) {
+    db.deletedAttendance.add(`${uIdNorm}_${evNorm}`);
+  }
+  db.deletedAttendance.add(uIdNorm);
+
+  // Clean scanLogs of duplicate markers for this participant/event
+  db.scanLogs = db.scanLogs.filter(
+    (l) => !(l.uniqueId.toLowerCase() === uIdNorm && (!event || l.scannedEvent.toLowerCase() === evNorm))
+  );
+
+  // Log in reset log
+  db.qrResetLogs.push({
+    timestamp: new Date().toISOString(),
+    uniqueId,
+    adminName: String(req.body?.actorName || 'Coordinator (Testing)'),
+    reason: 'Attendance record removed - QR re-eligible for scanning',
+    previousStatus: 'PRESENT',
+    newStatus: 'UNMARKED (Eligible)',
+    event: event || 'ALL',
+  });
+
+  // Also notify remote Google Sheet / Attendance API
+  if (ATTENDANCE_API_URL) {
+    Promise.allSettled([
+      callAttendanceApiPost('deleteAttendance', {
+        action: 'deleteAttendance',
+        uniqueId,
+        unique_id: uniqueId,
+        event,
+        scannedEvent: event,
+      }),
+      callAttendanceApiPost('resetAttendance', {
+        action: 'resetAttendance',
+        uniqueId,
+        unique_id: uniqueId,
+        event,
+        scannedEvent: event,
+      }),
+      callAttendanceApiPost('removeAttendance', {
+        action: 'removeAttendance',
+        uniqueId,
+        unique_id: uniqueId,
+        event,
+        scannedEvent: event,
+      }),
+    ]).catch(() => {});
+  }
+
+  return res.json({
+    success: true,
+    deletedCount,
+    message: `Attendance record deleted successfully. Participant ${uniqueId} is now re-eligible for scanning.`,
+  });
+};
+
+app.delete('/api/attendance', handleAttendanceDelete);
+app.post('/api/attendance/delete', handleAttendanceDelete);
+
+// ---------------------------------------------------------------------------
+// PARTICIPANT MANAGEMENT (ADMIN CRUD)
+// ---------------------------------------------------------------------------
+app.get('/api/participants', (req, res) => {
+  const q = String(req.query.q || '').trim().toLowerCase();
+  if (!q) {
+    return res.json({ success: true, participants: db.participants });
+  }
+  const filtered = db.participants.filter(
+    (p) =>
+      p.uniqueId.toLowerCase().includes(q) ||
+      p.name.toLowerCase().includes(q) ||
+      p.registrationNo.toLowerCase().includes(q) ||
+      p.college.toLowerCase().includes(q) ||
+      p.department.toLowerCase().includes(q) ||
+      p.email.toLowerCase().includes(q)
+  );
+  return res.json({ success: true, participants: filtered });
+});
+
+app.post('/api/participants', (req, res) => {
+  const { uniqueId, name, registrationNo, college, department, email, mobile, selectedEvents } = req.body;
+
+  if (!name || !registrationNo) {
+    return res.status(400).json({ success: false, message: 'Participant Name and Registration No are required.' });
+  }
+
+  let finalId = String(uniqueId || '').trim();
+  if (!finalId) {
+    const nextNum = db.participants.length + 1;
+    finalId = `SYN26-${String(nextNum).padStart(4, '0')}`;
+  }
+
+  if (db.participants.some((p) => p.uniqueId.toLowerCase() === finalId.toLowerCase())) {
+    return res.status(409).json({ success: false, message: `Participant with ID ${finalId} already exists.` });
+  }
+
+  const parsedEvents = Array.isArray(selectedEvents)
+    ? selectedEvents
+    : String(selectedEvents || '')
+        .split(/[,;]/)
+        .map((s) => s.trim())
+        .filter(Boolean);
+
+  const newPart: ParticipantRow = {
+    uniqueId: finalId,
+    name: name.trim(),
+    registrationNo: registrationNo.trim(),
+    college: (college || '').trim(),
+    department: (department || '').trim(),
+    email: (email || '').trim(),
+    mobile: (mobile || '').trim(),
+    selectedEvents: parsedEvents,
+    createdAt: new Date().toISOString(),
+  };
+
+  db.participants.push(newPart);
+  return res.status(201).json({ success: true, participant: newPart, message: 'Participant added successfully.' });
+});
+
+app.put('/api/participants/:id', (req, res) => {
+  const id = req.params.id.trim();
+  const idx = db.participants.findIndex((p) => p.uniqueId.toLowerCase() === id.toLowerCase());
+  if (idx === -1) {
+    return res.status(404).json({ success: false, message: 'Participant not found.' });
+  }
+
+  const { name, registrationNo, college, department, email, mobile, selectedEvents } = req.body;
+  const current = db.participants[idx];
+
+  const parsedEvents =
+    selectedEvents !== undefined
+      ? Array.isArray(selectedEvents)
+        ? selectedEvents
+        : String(selectedEvents)
+            .split(/[,;]/)
+            .map((s) => s.trim())
+            .filter(Boolean)
+      : current.selectedEvents;
+
+  db.participants[idx] = {
+    ...current,
+    name: name !== undefined ? name.trim() : current.name,
+    registrationNo: registrationNo !== undefined ? registrationNo.trim() : current.registrationNo,
+    college: college !== undefined ? college.trim() : current.college,
+    department: department !== undefined ? department.trim() : current.department,
+    email: email !== undefined ? email.trim() : current.email,
+    mobile: mobile !== undefined ? mobile.trim() : current.mobile,
+    selectedEvents: parsedEvents,
+  };
+
+  return res.json({ success: true, participant: db.participants[idx], message: 'Participant updated successfully.' });
+});
+
+app.delete('/api/participants/:id', (req, res) => {
+  const id = req.params.id.trim();
+  const idx = db.participants.findIndex((p) => p.uniqueId.toLowerCase() === id.toLowerCase());
+  if (idx === -1) {
+    return res.status(404).json({ success: false, message: 'Participant not found.' });
+  }
+
+  const deletedParticipant = db.participants.splice(idx, 1)[0];
+
+  // Remove associated attendance records and re-enable QR
+  const initialAttCount = db.attendance.length;
+  db.attendance = db.attendance.filter((a) => a.uniqueId.toLowerCase() !== id.toLowerCase());
+  const removedAttendance = initialAttCount - db.attendance.length;
+
+  return res.json({
+    success: true,
+    deletedParticipant,
+    removedAttendanceRecords: removedAttendance,
+    message: `Participant ${deletedParticipant.name} (${id}) deleted along with ${removedAttendance} attendance record(s).`,
+  });
 });
 
 // Coordinator dashboard stats
@@ -1256,7 +1565,10 @@ app.get('/api/stats/coordinator', async (req, res) => {
   }
 
   const matchingAttendance = db.attendance.filter(
-    (a) => a.scannedEvent.toLowerCase() === event.toLowerCase()
+    (a) =>
+      a.scannedEvent.toLowerCase() === event.toLowerCase() &&
+      !db.deletedAttendance.has(`${a.uniqueId.toLowerCase()}_${a.scannedEvent.toLowerCase()}`) &&
+      !db.deletedAttendance.has(a.uniqueId.toLowerCase())
   );
 
   const todayStr = new Date().toISOString().split('T')[0];
@@ -1275,7 +1587,7 @@ app.get('/api/stats/coordinator', async (req, res) => {
       result: 'SUCCESS' as const,
     }));
 
-  const totalScans = remoteEventCount !== null ? Math.max(matchingAttendance.length, remoteEventCount) : matchingAttendance.length;
+  const totalScans = matchingAttendance.length;
 
   res.json({
     success: true,
@@ -1291,43 +1603,100 @@ app.get('/api/stats/coordinator', async (req, res) => {
 // Overall Admin dashboard stats
 app.get('/api/stats/overall', async (req, res) => {
   let gasStatsResult: any = null;
-  try {
-    gasStatsResult = await callAttendanceApiGet('stats');
-  } catch (err: any) {
-    console.warn('Attendance API overall stats notice:', err.message);
+  if (ATTENDANCE_API_URL) {
+    try {
+      gasStatsResult = await callAttendanceApiGet('stats');
+    } catch (err: any) {
+      console.warn('Attendance API overall stats notice:', err.message);
+    }
   }
 
-  const uniqueParticipants = new Set(db.attendance.map((a) => a.uniqueId.toLowerCase()));
-  let totalAttendance = db.attendance.length;
-  const activeCoordinators = db.coordinators.filter((c) => c.status === 'ACTIVE').length;
+  // Sync coordinators from Coordinator API if available
+  if (COORDINATOR_API_URL) {
+    try {
+      const coordResult = await callCoordinatorApi('getCoordinators');
+      if (coordResult && coordResult.success && Array.isArray(coordResult.coordinators)) {
+        coordResult.coordinators.forEach((c: any) => {
+          const email = (c.email || '').trim().toLowerCase();
+          if (email && !db.deletedCoordinators.has(email)) {
+            const existing = db.coordinators.find((loc) => loc.email.toLowerCase() === email);
+            if (!existing) {
+              db.coordinators.push({
+                coordinatorId: `CRD-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
+                coordinatorName: c.coordinatorName || 'Coordinator',
+                email,
+                passwordHash: hashPassword(c.password || 'Coord@123'),
+                assignedEvent: c.event || '',
+                status: 'ACTIVE',
+                createdAt: new Date().toISOString(),
+              });
+            }
+          }
+        });
+      }
+    } catch (err: any) {
+      console.warn('Coordinator API sync notice:', err.message);
+    }
+  }
+
+  const registeredParticipantsCount = db.participants.length;
+  let remoteAttendanceCount: number | null = null;
+  if (gasStatsResult && gasStatsResult.success && gasStatsResult.stats && typeof gasStatsResult.stats.totalAttendance === 'number') {
+    remoteAttendanceCount = gasStatsResult.stats.totalAttendance;
+  }
+
+  const localPresentAttendance = db.attendance.filter((a) => a.attendanceStatus === 'PRESENT');
+  const totalAttendance =
+    remoteAttendanceCount !== null && remoteAttendanceCount > localPresentAttendance.length
+      ? remoteAttendanceCount
+      : localPresentAttendance.length;
+
+  const totalParticipants =
+    registeredParticipantsCount > 0
+      ? registeredParticipantsCount
+      : remoteAttendanceCount !== null && remoteAttendanceCount > 0
+      ? remoteAttendanceCount
+      : localPresentAttendance.length;
+
+  const activeCoordinators = db.coordinators.filter(
+    (c) => c.status === 'ACTIVE' && !db.deletedCoordinators.has(c.email.toLowerCase())
+  ).length;
+
   const totalEvents = db.events.length;
 
-  const eventCountMap: Record<string, number> = {};
-  db.events.forEach((e) => {
-    eventCountMap[e.eventName] = 0;
+  const eventWiseAttendance = db.events.map((e) => {
+    const localCount = localPresentAttendance.filter(
+      (a) =>
+        a.scannedEvent.toLowerCase() === e.eventName.toLowerCase() ||
+        isParticipantRegisteredForEvent([a.scannedEvent], e.eventName)
+    ).length;
+
+    let count = localCount;
+    if (gasStatsResult && gasStatsResult.success && gasStatsResult.stats?.eventWise?.[e.eventName] !== undefined) {
+      const remoteCount = Number(gasStatsResult.stats.eventWise[e.eventName]) || 0;
+      if (remoteCount > count) count = remoteCount;
+    }
+
+    const registeredForEvent = db.participants.filter((p) =>
+      isParticipantRegisteredForEvent(p.selectedEvents, e.eventName)
+    ).length;
+
+    const percentage =
+      registeredForEvent > 0
+        ? Math.min(100, Math.round((count / registeredForEvent) * 100))
+        : count > 0
+        ? 100
+        : 0;
+
+    return {
+      eventName: e.eventName,
+      count,
+      totalRegistered: registeredForEvent,
+      percentage,
+    };
   });
 
-  db.attendance.forEach((a) => {
-    eventCountMap[a.scannedEvent] = (eventCountMap[a.scannedEvent] || 0) + 1;
-  });
-
-  if (gasStatsResult && gasStatsResult.success && gasStatsResult.stats) {
-    if (typeof gasStatsResult.stats.totalAttendance === 'number') {
-      totalAttendance = Math.max(totalAttendance, gasStatsResult.stats.totalAttendance);
-    }
-    if (gasStatsResult.stats.eventWise && typeof gasStatsResult.stats.eventWise === 'object') {
-      for (const [evt, count] of Object.entries(gasStatsResult.stats.eventWise)) {
-        eventCountMap[evt] = Math.max(eventCountMap[evt] || 0, Number(count) || 0);
-      }
-    }
-  }
-
-  const eventWiseAttendance = Object.entries(eventCountMap).map(([eventName, count]) => ({
-    eventName,
-    count,
-  }));
-
-  const recentScans = db.attendance
+  const recentScans = localPresentAttendance
     .slice(-6)
     .reverse()
     .map((a) => ({
@@ -1342,7 +1711,7 @@ app.get('/api/stats/overall', async (req, res) => {
   res.json({
     success: true,
     stats: {
-      totalParticipants: Math.max(uniqueParticipants.size, totalAttendance),
+      totalParticipants,
       totalAttendance,
       activeCoordinators,
       totalEvents,

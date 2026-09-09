@@ -19,6 +19,7 @@ import {
   clearStoredSession,
   getSystemConfig,
   scanParticipantQR,
+  deleteAttendanceRecord,
 } from './services/api';
 
 export default function App() {
@@ -100,6 +101,12 @@ export default function App() {
     setIsScannerOpen(true);
   };
 
+  // Remove participant from attendance during testing and re-enable QR code
+  const handleRemoveAttendanceFromScan = async (uniqueId: string, event: string) => {
+    await deleteAttendanceRecord(uniqueId, event);
+    setDashboardRefreshTrigger((prev) => prev + 1);
+  };
+
   return (
     <div className="min-h-screen bg-[#070707] text-[#E0E0E0] flex flex-col selection:bg-[#F27D26]/30 selection:text-[#FCD34D]">
       {/* Universal Header */}
@@ -172,6 +179,7 @@ export default function App() {
         result={scanResult}
         onClose={() => setIsResultOpen(false)}
         onScanNext={handleScanNext}
+        onRemoveAttendance={handleRemoveAttendanceFromScan}
       />
     </div>
   );

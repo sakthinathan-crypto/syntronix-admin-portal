@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import confetti from 'canvas-confetti';
 import {
   CheckCircle2,
@@ -14,6 +14,8 @@ import {
   Camera,
   X,
   Sparkles,
+  Trash2,
+  RotateCcw,
 } from 'lucide-react';
 import { ScanResponse } from '../types';
 
@@ -22,6 +24,7 @@ interface ScanResultModalProps {
   result: ScanResponse | null;
   onClose: () => void;
   onScanNext: () => void;
+  onRemoveAttendance?: (uniqueId: string, event: string) => Promise<void>;
 }
 
 export const ScanResultModal: React.FC<ScanResultModalProps> = ({
@@ -29,7 +32,18 @@ export const ScanResultModal: React.FC<ScanResultModalProps> = ({
   result,
   onClose,
   onScanNext,
+  onRemoveAttendance,
 }) => {
+  const [isRemoving, setIsRemoving] = useState(false);
+  const [isRemoved, setIsRemoved] = useState(false);
+  const [removeError, setRemoveError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setIsRemoving(false);
+    setIsRemoved(false);
+    setRemoveError(null);
+  }, [isOpen, result]);
+
   useEffect(() => {
     if (isOpen && result && result.result === 'SUCCESS') {
       try {
@@ -61,6 +75,24 @@ export const ScanResultModal: React.FC<ScanResultModalProps> = ({
   const isAlreadyMarked = resultCode === 'ALREADY_MARKED';
   const isNotRegistered = resultCode === 'NOT_REGISTERED';
   const isInvalid = resultCode === 'INVALID_QR' || resultCode === 'ERROR';
+
+  const participantUniqueId = String(
+    (participant && (participant.unique_id || participant.uniqueId)) || ''
+  ).trim();
+
+  const handleRemoveClick = async () => {
+    if (!participantUniqueId || !onRemoveAttendance) return;
+    try {
+      setIsRemoving(true);
+      setRemoveError(null);
+      await onRemoveAttendance(participantUniqueId, scannedEvent);
+      setIsRemoved(true);
+    } catch (err: any) {
+      setRemoveError(err.message || 'Failed to remove attendance record.');
+    } finally {
+      setIsRemoving(false);
+    }
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/85 backdrop-blur-md animate-in fade-in duration-200">
@@ -362,6 +394,82 @@ export const ScanResultModal: React.FC<ScanResultModalProps> = ({
           )}
         </div>
 
+        {/* Testing Mode: Remove Attendance & Reset QR */}
+        {(isSuccess || isAlreadyMarked) && onRemoveAttendance && participantUniqueId && (
+          <div className="px-6 py-3.5 bg-red-950/20 border-t border-red-500/20">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-start gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-red-500/15 border border-red-500/30 text-red-400 flex items-center justify-center shrink-0 mt-0.5">
+                  <Trash2 className="w-4 h-4" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold font-mono text-red-400">TESTING MODE</span>
+                    <span className="px-1.5 py-0.5 rounded text-[9px] font-mono bg-red-500/20 text-red-300 font-bold uppercase tracking-wider">
+                      Coordinator Action
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-white/60 font-sans mt-0.5">
+                    {isRemoved
+                      ? 'Attendance deleted from registry & Google Sheet! Scanned count reduced. QR code is ready to scan again.'
+                      : 'Remove this participant from attendance, reduce the scanned count, and re-enable their QR code for scanning.'}
+                  </p>
+                </div>
+              </div>
+
+              {!isRemoved ? (
+                <button
+                  type="button"
+                  id="btn-remove-participant-testing"
+                  disabled={isRemoving}
+                  onClick={handleRemoveClick}
+                  className="px-4 py-2.5 rounded-xl text-xs font-mono font-bold text-white bg-red-600 hover:bg-red-500 active:scale-95 shadow-lg shadow-red-600/20 transition-all flex items-center justify-center gap-1.5 shrink-0 disabled:opacity-50"
+                >
+                  {isRemoving ? (
+                    <>
+                      <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                      <span>Removing...</span>
+                    </>
+                  ) : (
+                    <>
+                      <RotateCcw className="w-3.5 h-3.5" />
+                      <span>REMOVE & RESET QR</span>
+                    </>
+                  )}
+                </button>
+              ) : (
+                <div className="px-3 py-1.5 rounded-xl bg-emerald-500/20 border border-emerald-500/30 text-emerald-400 text-xs font-mono font-bold flex items-center gap-1.5 shrink-0">
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  <span>REMOVED (READY TO SCAN)</span>
+                </div>
+              )}
+            </div>
+
+            {removeError && (
+              <div className="mt-2.5 p-2 rounded-lg bg-red-500/20 border border-red-500/30 text-[11px] text-red-400 font-mono flex items-center gap-1.5">
+                <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                <span>{removeError}</span>
+              </div>
+            )}
+
+            {isRemoved && (
+              <div className="mt-2.5 p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-xs text-emerald-300 font-mono flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                  <span>Participant removed! Attendance count reduced by 1.</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={onScanNext}
+                  className="text-emerald-400 hover:text-white underline font-bold text-[11px] shrink-0"
+                >
+                  Scan QR Again &rarr;
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Footer Actions */}
         <div className="p-4 sm:p-5 bg-[#070707] border-t border-white/10 flex items-center justify-between gap-3">
           <button
@@ -374,10 +482,14 @@ export const ScanResultModal: React.FC<ScanResultModalProps> = ({
           <button
             id="btn-scan-next-participant"
             onClick={onScanNext}
-            className="flex-1 py-3 px-5 rounded-xl font-bold text-xs uppercase tracking-widest text-[#070707] bg-[#F27D26] hover:opacity-90 shadow-lg shadow-[#F27D26]/20 active:scale-[0.98] transition-all flex items-center justify-center gap-2"
+            className={`flex-1 py-3 px-5 rounded-xl font-bold text-xs uppercase tracking-widest text-[#070707] transition-all flex items-center justify-center gap-2 ${
+              isRemoved
+                ? 'bg-emerald-400 hover:bg-emerald-300 shadow-lg shadow-emerald-400/20'
+                : 'bg-[#F27D26] hover:opacity-90 shadow-lg shadow-[#F27D26]/20'
+            } active:scale-[0.98]`}
           >
             <Camera className="w-4 h-4 text-[#070707]" />
-            <span>SCAN NEXT PARTICIPANT</span>
+            <span>{isRemoved ? 'SCAN THIS QR AGAIN NOW' : 'SCAN NEXT PARTICIPANT'}</span>
           </button>
         </div>
       </div>

@@ -85,6 +85,7 @@ export type ScanResultCode =
   | 'NOT_REGISTERED'
   | 'INVALID_QR'
   | 'UNAUTHORIZED'
+  | 'REVOKED'
   | 'ERROR';
 
 export interface ScanLog {
@@ -96,6 +97,18 @@ export interface ScanLog {
   scannedEvent: string;
   result: ScanResultCode;
   message: string;
+}
+
+export interface ParticipantRecord {
+  uniqueId: string;
+  name: string;
+  registrationNo: string;
+  college: string;
+  department: string;
+  email: string;
+  mobile: string;
+  selectedEvents: string[];
+  createdAt?: string;
 }
 
 export interface QrResetLog {
@@ -145,6 +158,7 @@ export interface ScanResponse {
   scannedEvent: string;
   coordinatorName: string;
   timestamp: string;
+  errorDetail?: string;
   previousScan?: {
     coordinatorName: string;
     scanTime: string;
@@ -163,6 +177,8 @@ export interface SystemStats {
   eventWiseAttendance: {
     eventName: string;
     count: number;
+    totalParticipants?: number;
+    percentage?: number;
   }[];
   recentScans: {
     uniqueId: string;
@@ -187,6 +203,8 @@ export interface CoordinatorStats {
 
 export interface BackendConfig {
   googleAppsScriptUrl: string;
+  attendanceApiUrl?: string;
+  attendanceApiKey?: string;
   isCustomGasConfigured: boolean;
   adminAccessKeyConfigured: boolean;
   connectionStatus: 'CONNECTED' | 'FALLBACK_READY' | 'DISCONNECTED';

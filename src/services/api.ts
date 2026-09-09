@@ -17,6 +17,7 @@ import {
   ScanResponse,
   ParticipantQRData,
   BackendConfig,
+  ParticipantRecord,
 } from '../types';
 import {
   isParticipantRegisteredForEvent,
@@ -611,18 +612,20 @@ export async function markAttendance(
       a.attendanceStatus === 'PRESENT'
   );
 
-  // Attempt server-side mark attendance first
-  const { ok, data } = await fetchApiJson(`${API_BASE}/attendance/mark`, {
+  // Attempt server-side mark attendance
+  const storedSession = getStoredSession();
+  const { data } = await fetchApiJson(`${API_BASE}/attendance/mark`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       participant,
       coordinatorName,
       coordinatorAssignedEvent,
+      coordinatorEmail: storedSession?.user?.email,
     }),
   });
 
-  if (ok && data) {
+  if (data && data.result) {
     const finalData: ScanResponse = {
       ...data,
       participant: data.participant || participant,
@@ -636,7 +639,7 @@ export async function markAttendance(
     return finalData;
   }
 
-  // Fallback if backend server endpoint is not responding
+  // If local duplicate check matches
   if (existingLocal) {
     const attendedForParticipant = localList
       .filter((a) => a.uniqueId.toLowerCase() === uniqueId.toLowerCase() && a.attendanceStatus === 'PRESENT')
@@ -644,7 +647,7 @@ export async function markAttendance(
 
     return {
       result: 'ALREADY_MARKED',
-      message: 'EVENT ATTENDANCE ALREADY USED / MARKED',
+      message: 'Already Marked',
       participant,
       scannedEvent: coordinatorAssignedEvent,
       coordinatorName,
@@ -661,94 +664,100 @@ export async function markAttendance(
     };
   }
 
-  // Mark attendance directly
-  const now = new Date();
-  const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
-  const dateStr = now.toISOString().split('T')[0];
-
-  const newRecord: AttendanceRecord = {
-    id: `ATT-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-    timestamp: now.toISOString(),
-    uniqueId,
-    participantName: participant.name || 'Participant',
-    universityRegNumber:
-      participant.registrationNo || participant.universityRegistrationNumber || '',
-    email: participant.email || '',
-    mobileNumber: participant.mobile || participant.mobileNumber || '',
-    collegeName: participant.college || participant.collegeName || '',
-    fieldOfStudy: participant.fieldOfStudy || '',
-    department: participant.department || '',
-    teamName: participant.teamName || '',
-    leaderName: participant.leaderName || '',
-    membersName: participant.members || participant.membersName || '',
-    registeredEvents,
-    scannedEvent: coordinatorAssignedEvent,
-    coordinatorName,
-    attendanceDate: dateStr,
-    attendanceTime: timeStr,
-    attendanceStatus: 'PRESENT',
-  };
-
-  saveLocalAttendance(newRecord);
-
-  // Sync with Attendance GAS API in background
-  try {
-    fetch(ATTENDANCE_API_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({
-        action: 'markAttendance',
-        uniqueId,
-        unique_id: uniqueId,
-        name: participant.name || '',
-        registrationNo: participant.registrationNo || participant.universityRegistrationNumber || '',
-        universityRegNumber: participant.registrationNo || participant.universityRegistrationNumber || '',
-        email: participant.email || '',
-        mobile: participant.mobile || participant.mobileNumber || '',
-        college: participant.college || participant.collegeName || '',
-        department: participant.department || '',
-        fieldOfStudy: participant.fieldOfStudy || '',
-        teamName: participant.teamName || '',
-        leaderName: participant.leaderName || '',
-        members: participant.members || participant.membersName || '',
-        degree: participant.degree || '',
-        year: participant.year || '',
-        collegeLocation: participant.collegeLocation || '',
-        teamLeaderEmail: participant.teamLeaderEmail || '',
-        member1Mobile: participant.member1Mobile || '',
-        member2Mobile: participant.member2Mobile || '',
-        selectedEvents: participant.selectedEvents || registeredEvents.join(', '),
-        registeredEvents,
-        scannedEvent: coordinatorAssignedEvent,
-        event: coordinatorAssignedEvent,
-        coordinatorName,
-        scannedAt: now.toISOString(),
-      }),
-    }).catch((err) => console.warn('Background GAS attendance sync notice:', err));
-  } catch (err) {
-    console.warn('GAS fetch dispatch error:', err);
-  }
-
-  const updatedLocal = getLocalAttendance();
-  const attendedForParticipant = updatedLocal
-    .filter((a) => a.uniqueId.toLowerCase() === uniqueId.toLowerCase() && a.attendanceStatus === 'PRESENT')
-    .map((a) => a.scannedEvent);
-
-  const allCompleted =
-    registeredEvents.length > 0 &&
-    registeredEvents.every((ev) => isParticipantRegisteredForEvent(attendedForParticipant, ev));
-
+  // Requirement 11: The success message must only appear after the API confirms that attendance was written successfully.
+  // If the API fails: Show: "Attendance could not be recorded." and show/log the actual API error for debugging.
   return {
-    result: 'SUCCESS',
-    message: 'ATTENDANCE MARKED SUCCESSFULLY',
+    result: 'ERROR',
+    message: 'Attendance could not be recorded.',
+    errorDetail: data?.errorDetail || data?.error || 'Attendance API backend confirmation required.',
     participant,
     scannedEvent: coordinatorAssignedEvent,
     coordinatorName,
-    timestamp: now.toISOString(),
-    allEventsCompleted: allCompleted,
-    attendedEvents: attendedForParticipant,
-    attendanceRecord: newRecord,
+    timestamp: new Date().toISOString(),
   };
+}
+
+export async function deleteAttendanceRecord(uniqueId: string, event?: string): Promise<boolean> {
+  // 1. Remove from local storage immediately
+  try {
+    const list = getLocalAttendance().filter((a) => {
+      if (a.uniqueId.toLowerCase() !== uniqueId.toLowerCase()) return true;
+      if (event && a.scannedEvent.toLowerCase() !== event.toLowerCase()) return true;
+      return false;
+    });
+    localStorage.setItem(LOCAL_ATTENDANCE_KEY, JSON.stringify(list));
+  } catch (e) {
+    console.warn('Failed to delete from local attendance:', e);
+  }
+
+  // 2. Call backend server
+  const { ok, data } = await fetchApiJson(`${API_BASE}/attendance/delete`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ uniqueId, event }),
+  });
+
+  return ok && (data?.success ?? true);
+}
+
+// ---------------------------------------------------------------------------
+// PARTICIPANT CRUD SERVICES
+// ---------------------------------------------------------------------------
+export async function getParticipants(query?: string): Promise<ParticipantRecord[]> {
+  const url = query ? `${API_BASE}/participants?q=${encodeURIComponent(query)}` : `${API_BASE}/participants`;
+  const { ok, data } = await fetchApiJson(url);
+  if (ok && data && Array.isArray(data.participants)) {
+    return data.participants;
+  }
+  return [];
+}
+
+export async function addParticipant(newParticipant: {
+  uniqueId?: string;
+  name: string;
+  registrationNo: string;
+  college?: string;
+  department?: string;
+  email?: string;
+  mobile?: string;
+  selectedEvents?: string[] | string;
+}): Promise<ParticipantRecord> {
+  const { ok, data } = await fetchApiJson(`${API_BASE}/participants`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(newParticipant),
+  });
+  if (ok && data && data.participant) {
+    return data.participant;
+  }
+  throw new Error(data?.message || 'Failed to add participant');
+}
+
+export async function updateParticipant(
+  id: string,
+  updatedData: Partial<ParticipantRecord>
+): Promise<ParticipantRecord> {
+  const { ok, data } = await fetchApiJson(`${API_BASE}/participants/${encodeURIComponent(id)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(updatedData),
+  });
+  if (ok && data && data.participant) {
+    return data.participant;
+  }
+  throw new Error(data?.message || 'Failed to update participant');
+}
+
+export async function deleteParticipant(id: string): Promise<boolean> {
+  try {
+    const list = getLocalAttendance().filter((a) => a.uniqueId.toLowerCase() !== id.toLowerCase());
+    localStorage.setItem(LOCAL_ATTENDANCE_KEY, JSON.stringify(list));
+  } catch {}
+
+  const { ok, data } = await fetchApiJson(`${API_BASE}/participants/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+  });
+  return ok && (data?.success ?? true);
 }
 
 export async function getAttendance(event?: string): Promise<AttendanceRecord[]> {
@@ -784,14 +793,7 @@ export async function getCoordinatorStats(assignedEvent: string): Promise<Coordi
 
   const { ok, data } = await fetchApiJson(`${API_BASE}/stats/coordinator?assignedEvent=${encodeURIComponent(assignedEvent)}`);
   if (ok && data && data.stats) {
-    const stats = data.stats;
-    const todayAtt = Math.max(stats.todayAttendance || 0, local.length);
-    const totalScans = Math.max(stats.totalScans || 0, local.length);
-    return {
-      ...stats,
-      todayAttendance: todayAtt,
-      totalScans: totalScans,
-    };
+    return data.stats;
   }
 
   return {
@@ -811,19 +813,36 @@ export async function getSystemStats(): Promise<SystemStats> {
   if (ok && data && data.stats) {
     return data.stats;
   }
+  // Remove all random/static 42, 0, 1, 5! Calculate purely from real data:
+  const [localAtt, coords, eventsList, parts] = await Promise.all([
+    getAttendance(),
+    getCoordinators(),
+    getEvents(),
+    getParticipants(),
+  ]);
+  const activeCoords = coords.filter((c) => c.status === 'ACTIVE');
   return {
-    totalParticipants: 42,
-    totalAttendance: 0,
-    activeCoordinators: 1,
-    totalEvents: 5,
-    eventWiseAttendance: [
-      { eventName: 'Paper Presentation', count: 0 },
-      { eventName: 'Poster Making', count: 0 },
-      { eventName: 'Code Debugging', count: 0 },
-      { eventName: 'Web Designing', count: 0 },
-      { eventName: 'Technical Quiz', count: 0 },
-    ],
-    recentScans: [],
+    totalParticipants: parts.length > 0 ? parts.length : localAtt.length,
+    totalAttendance: localAtt.length,
+    activeCoordinators: activeCoords.length,
+    totalEvents: eventsList.length,
+    eventWiseAttendance: eventsList.map((e) => ({
+      eventName: e.eventName,
+      count: localAtt.filter((a) => a.scannedEvent.toLowerCase() === e.eventName.toLowerCase()).length,
+      totalParticipants: parts.filter((p) =>
+        Array.isArray(p.selectedEvents) &&
+        p.selectedEvents.some((se) => se.toLowerCase() === e.eventName.toLowerCase())
+      ).length,
+      percentage: 0,
+    })),
+    recentScans: localAtt.slice(0, 6).map((a) => ({
+      uniqueId: a.uniqueId,
+      participantName: a.participantName,
+      scannedEvent: a.scannedEvent,
+      coordinatorName: a.coordinatorName,
+      attendanceTime: a.attendanceTime,
+      result: 'SUCCESS' as const,
+    })),
   };
 }
 
