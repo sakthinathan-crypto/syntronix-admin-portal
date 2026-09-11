@@ -151,6 +151,8 @@ function handleRequest(e, method) {
         break;
 
       case "resetAttendance":
+      case "deleteAttendance":
+      case "removeAttendance":
         output = handleResetAttendance(params);
         break;
 
@@ -380,9 +382,17 @@ function handleMarkAttendance(params) {
   }
 
   // STEP 4 & 5: Check whether participant registered for the coordinator's assigned event
+  var normalizeEvent = function(s) {
+    return String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  };
+
   var isRegisteredForEvent = false;
+  var targetNorm = normalizeEvent(coordinatorEvent);
   for (var k = 0; k < registeredEvents.length; k++) {
-    if (String(registeredEvents[k]).trim().toLowerCase() === coordinatorEvent.toLowerCase()) {
+    var evNorm = normalizeEvent(registeredEvents[k]);
+    if (evNorm === targetNorm || 
+        (targetNorm.indexOf("paper") !== -1 && evNorm.indexOf("paper") !== -1) ||
+        (targetNorm.indexOf("technical") !== -1 && evNorm.indexOf("technical") !== -1 && targetNorm.slice(-2) === evNorm.slice(-2))) {
       isRegisteredForEvent = true;
       break;
     }
@@ -393,7 +403,7 @@ function handleMarkAttendance(params) {
     return {
       success: false,
       result: "NOT_REGISTERED",
-      message: "NOT REGISTERED FOR THIS EVENT",
+      message: "Participant is not registered for your assigned event.",
       participant: participant,
       scannedEvent: coordinatorEvent,
       coordinatorName: coordinatorName
@@ -420,7 +430,7 @@ function handleMarkAttendance(params) {
       var rowStatus = String(data[i][17]).trim();
 
       if (rowUniqueId.toLowerCase() === uniqueId.toLowerCase() && 
-          rowEvent.toLowerCase() === coordinatorEvent.toLowerCase() &&
+          (rowEvent.toLowerCase() === coordinatorEvent.toLowerCase() || normalizeEvent(rowEvent) === targetNorm) &&
           rowStatus === "PRESENT") {
         
         var prevCoord = String(data[i][14]);
@@ -432,7 +442,7 @@ function handleMarkAttendance(params) {
         return {
           success: false,
           result: "ALREADY_MARKED",
-          message: "ALREADY MARKED",
+          message: "Attendance Already Marked for this Event.",
           participant: participant,
           scannedEvent: coordinatorEvent,
           coordinatorName: coordinatorName,
@@ -861,14 +871,19 @@ function handleGetParticipantAttendance(params) {
 }
 
 function handleResetAttendance(params) {
-  var uniqueId = (params.uniqueId || "").trim();
-  var event = (params.event || "").trim();
-  var adminName = (params.adminName || "").trim();
-  var reason = (params.reason || "").trim();
+  var uniqueId = (params.uniqueId || params.unique_id || "").trim();
+  var event = (params.event || params.scannedEvent || "").trim();
+  var adminName = (params.adminName || params.actorName || params.coordinatorName || "Coordinator (Testing Reset)").trim();
+  var reason = (params.reason || "Testing Mode QR Reset").trim();
 
-  if (!uniqueId || !event || !adminName || !reason) {
-    return { success: false, error: "Unique ID, Event, Admin Name, and Reason are all mandatory." };
+  if (!uniqueId) {
+    return { success: false, error: "Unique ID is mandatory for QR reset." };
   }
+
+  var normalizeEvent = function(s) {
+    return String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  };
+  var targetNorm = event ? normalizeEvent(event) : "";
 
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var attSheet = ss.getSheetByName(SHEETS.ATTENDANCE);
@@ -878,8 +893,11 @@ function handleResetAttendance(params) {
   for (var i = data.length - 1; i >= 1; i--) {
     var rowUniqueId = String(data[i][1]).trim();
     var rowEvent = String(data[i][13]).trim();
+    var rowEventNorm = normalizeEvent(rowEvent);
 
-    if (rowUniqueId.toLowerCase() === uniqueId.toLowerCase() && rowEvent.toLowerCase() === event.toLowerCase()) {
+    var eventMatches = !targetNorm || rowEvent.toLowerCase() === event.toLowerCase() || rowEventNorm === targetNorm;
+
+    if (rowUniqueId.toLowerCase() === uniqueId.toLowerCase() && eventMatches) {
       var prevStatus = String(data[i][17]);
       attSheet.deleteRow(i + 1);
       found = true;
@@ -893,17 +911,17 @@ function handleResetAttendance(params) {
         reason,
         prevStatus,
         "RESET / REMOVED",
-        event
+        rowEvent || event
       ]);
       break;
     }
   }
 
   if (!found) {
-    return { success: false, error: "No attendance record found for " + uniqueId + " in " + event };
+    return { success: false, error: "No attendance record found for " + uniqueId + (event ? (" in " + event) : "") };
   }
 
-  return { success: true, message: "Attendance state reset successfully for " + uniqueId + " in " + event };
+  return { success: true, message: "Attendance state reset successfully for " + uniqueId + (event ? (" in " + event) : "") };
 }
 
 // ---------------------------------------------------------------------------

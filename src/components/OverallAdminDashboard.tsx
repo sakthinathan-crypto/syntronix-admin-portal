@@ -22,6 +22,8 @@ import {
   Trash2,
   UserPlus,
   Edit3,
+  X,
+  Loader2,
 } from 'lucide-react';
 import {
   AdminStats,
@@ -48,6 +50,8 @@ import {
   deleteParticipant,
   isCoordinatorDeletedClient,
   addDeletedCoordinatorLocal,
+  removeDeletedCoordinatorLocal,
+  addCoordinator,
 } from '../services/api';
 import { EventManagementModal } from './EventManagementModal';
 import { ResetAttendanceModal } from './ResetAttendanceModal';
@@ -105,6 +109,61 @@ export const OverallAdminDashboard: React.FC<OverallAdminDashboardProps> = ({
   const [deletingCoord, setDeletingCoord] = useState(false);
   const [deleteSuccessMessage, setDeleteSuccessMessage] = useState<string | null>(null);
   const [deleteErrorMessage, setDeleteErrorMessage] = useState<string | null>(null);
+
+  // Add Coordinator Modal States
+  const [showAddCoordinatorModal, setShowAddCoordinatorModal] = useState(false);
+  const [newCoordName, setNewCoordName] = useState('');
+  const [newCoordEmail, setNewCoordEmail] = useState('');
+  const [newCoordPassword, setNewCoordPassword] = useState('');
+  const [newCoordEvent, setNewCoordEvent] = useState('');
+  const [addingCoord, setAddingCoord] = useState(false);
+  const [addCoordError, setAddCoordError] = useState<string | null>(null);
+  const [addCoordSuccess, setAddCoordSuccess] = useState<string | null>(null);
+
+  const handleCreateCoordinator = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAddCoordError(null);
+    setAddCoordSuccess(null);
+
+    if (!newCoordName.trim() || !newCoordEmail.trim() || !newCoordPassword.trim() || !newCoordEvent.trim()) {
+      setAddCoordError('All fields (Name, Email, Password, Assigned Event) are required.');
+      return;
+    }
+
+    try {
+      setAddingCoord(true);
+      removeDeletedCoordinatorLocal([newCoordEmail.trim(), newCoordName.trim()]);
+      const added = await addCoordinator({
+        coordinatorName: newCoordName.trim(),
+        email: newCoordEmail.trim(),
+        password: newCoordPassword.trim(),
+        assignedEvent: newCoordEvent.trim(),
+      });
+
+      // Update coordinators list immediately in state
+      setCoordinators((prev) => {
+        const filtered = prev.filter((c) => c.email.toLowerCase() !== added.email.toLowerCase());
+        return [added, ...filtered];
+      });
+
+      setAddCoordSuccess(`Coordinator ${added.coordinatorName} added successfully with ACTIVE status.`);
+      setNewCoordName('');
+      setNewCoordEmail('');
+      setNewCoordPassword('');
+      setNewCoordEvent('');
+      setShowAddCoordinatorModal(false);
+
+      // Refresh stats and full roster
+      loadAllData();
+      setTimeout(() => {
+        setAddCoordSuccess(null);
+      }, 5000);
+    } catch (err: any) {
+      setAddCoordError(err.message || 'Failed to add coordinator.');
+    } finally {
+      setAddingCoord(false);
+    }
+  };
 
   const handleConfirmDeleteCoordinator = async () => {
     if (!coordinatorToDelete) return;
@@ -432,7 +491,10 @@ export const OverallAdminDashboard: React.FC<OverallAdminDashboardProps> = ({
           {(() => {
             const techEventsCount = events.filter((e) => e.category === 'TECHNICAL').length;
             const nonTechEventsCount = events.filter((e) => e.category === 'NON_TECHNICAL').length;
-            const activeCoordsCount = coordinators.filter((c) => c.status === 'ACTIVE').length;
+            const visibleCoordinators = coordinators.filter((c) => !isCoordinatorDeletedClient(c));
+            const activeCoordsCount = visibleCoordinators.filter(
+              (c) => (c.status || 'ACTIVE').toUpperCase() === 'ACTIVE'
+            ).length;
 
             return (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
@@ -482,10 +544,10 @@ export const OverallAdminDashboard: React.FC<OverallAdminDashboardProps> = ({
                     </div>
                   </div>
                   <div className="text-3xl font-black text-[#F27D26] font-['Space_Grotesk'] mt-3">
-                    {stats?.activeCoordinators ?? activeCoordsCount}
+                    {activeCoordsCount}
                   </div>
                   <p className="text-[11px] text-white/40 font-mono mt-1">
-                    {activeCoordsCount} of {coordinators.length} active
+                    {activeCoordsCount} of {visibleCoordinators.length} active
                   </p>
                 </div>
 
@@ -1174,10 +1236,40 @@ export const OverallAdminDashboard: React.FC<OverallAdminDashboardProps> = ({
                 Global Coordinators Roster
               </h3>
               <p className="text-xs text-white/40 font-mono">
-                Total Registered Staff: {coordinators.length}
+                Total Registered Staff: {coordinators.filter((c) => !isCoordinatorDeletedClient(c)).length}
               </p>
             </div>
+            <button
+              id="btn-open-add-coordinator-modal"
+              onClick={() => {
+                setAddCoordError(null);
+                setNewCoordName('');
+                setNewCoordEmail('');
+                setNewCoordPassword('');
+                setNewCoordEvent(events[0]?.eventName || '');
+                setShowAddCoordinatorModal(true);
+              }}
+              className="py-2.5 px-4 rounded-xl font-mono text-xs font-bold text-[#070707] bg-[#F27D26] hover:opacity-90 shadow-lg shadow-[#F27D26]/20 active:scale-95 transition-all flex items-center gap-1.5 uppercase tracking-wider"
+            >
+              <Plus className="w-4 h-4 text-[#070707]" />
+              <span>+ ADD COORDINATOR</span>
+            </button>
           </div>
+
+          {addCoordSuccess && (
+            <div className="p-3.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-xs font-mono text-emerald-400 flex items-center justify-between animate-in fade-in duration-200">
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                <span>{addCoordSuccess}</span>
+              </div>
+              <button
+                onClick={() => setAddCoordSuccess(null)}
+                className="text-white/40 hover:text-white"
+              >
+                <XCircle className="w-4 h-4" />
+              </button>
+            </div>
+          )}
 
           {deleteSuccessMessage && (
             <div className="p-3.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-xs font-mono text-emerald-400 flex items-center justify-between animate-in fade-in duration-200">
@@ -1207,42 +1299,46 @@ export const OverallAdminDashboard: React.FC<OverallAdminDashboardProps> = ({
                 </tr>
               </thead>
               <tbody className="divide-y divide-white/5 font-mono">
-                {coordinators.filter((c) => !isCoordinatorDeletedClient(c)).map((c) => (
-                  <tr key={c.coordinatorId} className="hover:bg-white/[0.03]">
-                    <td className="py-3 px-4 font-bold text-[#F27D26]">{c.coordinatorId}</td>
-                    <td className="py-3 px-4 font-sans font-medium text-white">
-                      {c.coordinatorName}
-                    </td>
-                    <td className="py-3 px-4 text-white/50">{c.email}</td>
-                    <td className="py-3 px-4 text-white font-semibold">{c.assignedEvent}</td>
-                    <td className="py-3 px-4">
-                      <span
-                        className={`px-2 py-0.5 rounded text-[10px] ${
-                          c.status === 'ACTIVE'
-                            ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
-                            : 'bg-white/5 text-white/40'
-                        }`}
-                      >
-                        {c.status}
-                      </span>
-                    </td>
-                    <td className="py-3 px-4 text-right">
-                      <button
-                        type="button"
-                        id={`btn-delete-${c.coordinatorId}`}
-                        onClick={() => {
-                          setDeleteErrorMessage(null);
-                          setCoordinatorToDelete(c);
-                        }}
-                        className="px-3 py-1.5 rounded-lg font-mono text-[11px] font-bold text-red-400 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 hover:border-red-500/40 transition-colors inline-flex items-center gap-1.5"
-                        title={`Delete ${c.coordinatorName}`}
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                        <span>DELETE</span>
-                      </button>
-                    </td>
-                  </tr>
-                ))}
+                {coordinators.filter((c) => !isCoordinatorDeletedClient(c)).map((c) => {
+                  const currentStatus = (c.status || 'ACTIVE').toUpperCase();
+                  const isActive = currentStatus === 'ACTIVE';
+                  return (
+                    <tr key={c.coordinatorId} className="hover:bg-white/[0.03]">
+                      <td className="py-3 px-4 font-bold text-[#F27D26]">{c.coordinatorId}</td>
+                      <td className="py-3 px-4 font-sans font-medium text-white">
+                        {c.coordinatorName}
+                      </td>
+                      <td className="py-3 px-4 text-white/50">{c.email}</td>
+                      <td className="py-3 px-4 text-white font-semibold">{c.assignedEvent}</td>
+                      <td className="py-3 px-4">
+                        <span
+                          className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                            isActive
+                              ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                              : 'bg-white/5 text-white/40'
+                          }`}
+                        >
+                          {currentStatus}
+                        </span>
+                      </td>
+                      <td className="py-3 px-4 text-right">
+                        <button
+                          type="button"
+                          id={`btn-delete-${c.coordinatorId}`}
+                          onClick={() => {
+                            setDeleteErrorMessage(null);
+                            setCoordinatorToDelete(c);
+                          }}
+                          className="px-3 py-1.5 rounded-lg font-mono text-[11px] font-bold text-red-400 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 hover:border-red-500/40 transition-colors inline-flex items-center gap-1.5"
+                          title={`Delete ${c.coordinatorName}`}
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span>DELETE</span>
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
                 {coordinators.filter((c) => !isCoordinatorDeletedClient(c)).length === 0 && (
                   <tr>
                     <td colSpan={6} className="py-8 text-center text-white/40 font-mono">
@@ -1330,6 +1426,131 @@ export const OverallAdminDashboard: React.FC<OverallAdminDashboardProps> = ({
                     )}
                   </button>
                 </div>
+              </div>
+            </div>
+          )}
+
+          {/* Add Coordinator Dialog */}
+          {showAddCoordinatorModal && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-in fade-in duration-150">
+              <div className="relative w-full max-w-md bg-[#0A0A0A] border border-white/10 rounded-2xl p-6 shadow-2xl space-y-4">
+                <div className="flex items-center justify-between border-b border-white/10 pb-3">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-9 h-9 rounded-xl bg-[#F27D26]/10 border border-[#F27D26]/20 flex items-center justify-center text-[#F27D26]">
+                      <Shield className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h4 className="text-base font-bold text-white font-['Space_Grotesk']">
+                        Add New Coordinator
+                      </h4>
+                      <p className="text-xs text-white/50 font-mono">
+                        Register coordinator credentials and assign event
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setShowAddCoordinatorModal(false)}
+                    className="p-1 rounded-lg text-white/40 hover:text-white transition-colors"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+
+                <form onSubmit={handleCreateCoordinator} className="space-y-4">
+                  {addCoordError && (
+                    <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-xs font-mono text-red-400 flex items-center gap-2">
+                      <AlertTriangle className="w-4 h-4 shrink-0" />
+                      <span>{addCoordError}</span>
+                    </div>
+                  )}
+
+                  <div className="space-y-3 font-mono text-xs">
+                    <div>
+                      <label className="block text-white/50 mb-1.5 uppercase tracking-wider text-[10px]">
+                        Coordinator Full Name
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        value={newCoordName}
+                        onChange={(e) => setNewCoordName(e.target.value)}
+                        placeholder="e.g. Megna"
+                        className="w-full px-3.5 py-2.5 rounded-xl bg-white/5 border border-white/10 text-white placeholder-white/20 focus:outline-none focus:border-[#F27D26]"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-white/50 mb-1.5 uppercase tracking-wider text-[10px]">
+                        Email Address (Username)
+                      </label>
+                      <input
+                        type="email"
+                        required
+                        value={newCoordEmail}
+                        onChange={(e) => setNewCoordEmail(e.target.value)}
+                        placeholder="e.g. megna@syntronix.in"
+                        className="w-full px-3.5 py-2.5 rounded-xl bg-white/5 border border-white/10 text-white placeholder-white/20 focus:outline-none focus:border-[#F27D26]"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-white/50 mb-1.5 uppercase tracking-wider text-[10px]">
+                        Password
+                      </label>
+                      <input
+                        type="password"
+                        required
+                        value={newCoordPassword}
+                        onChange={(e) => setNewCoordPassword(e.target.value)}
+                        placeholder="Enter secure password"
+                        className="w-full px-3.5 py-2.5 rounded-xl bg-white/5 border border-white/10 text-white placeholder-white/20 focus:outline-none focus:border-[#F27D26]"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-white/50 mb-1.5 uppercase tracking-wider text-[10px]">
+                        Assigned Symposium Event
+                      </label>
+                      <select
+                        value={newCoordEvent}
+                        onChange={(e) => setNewCoordEvent(e.target.value)}
+                        required
+                        className="w-full px-3.5 py-2.5 rounded-xl bg-[#141414] border border-white/10 text-white focus:outline-none focus:border-[#F27D26]"
+                      >
+                        <option value="" disabled>Select an Event</option>
+                        {events.map((ev) => (
+                          <option key={ev.eventId} value={ev.eventName}>
+                            {ev.eventName} ({ev.category})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-end gap-3 pt-3 border-t border-white/10">
+                    <button
+                      type="button"
+                      onClick={() => setShowAddCoordinatorModal(false)}
+                      className="px-4 py-2 rounded-xl text-xs font-mono text-white/40 hover:text-white"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={addingCoord}
+                      className="px-5 py-2.5 rounded-xl font-mono text-xs font-bold text-[#070707] bg-[#F27D26] hover:opacity-90 active:scale-95 transition-all uppercase tracking-wider disabled:opacity-50 flex items-center gap-1.5"
+                    >
+                      {addingCoord ? (
+                        <>
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          <span>SAVING...</span>
+                        </>
+                      ) : (
+                        <span>SAVE COORDINATOR</span>
+                      )}
+                    </button>
+                  </div>
+                </form>
               </div>
             </div>
           )}

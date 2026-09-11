@@ -31,6 +31,8 @@ import {
   deactivateJury,
   getAttendance,
   updateEvent,
+  removeDeletedCoordinatorLocal,
+  isCoordinatorDeletedClient,
 } from '../services/api';
 
 interface EventManagementModalProps {
@@ -128,6 +130,7 @@ export const EventManagementModal: React.FC<EventManagementModalProps> = ({
     }
 
     try {
+      removeDeletedCoordinatorLocal([coordEmail.trim(), coordName.trim()]);
       await addCoordinator({
         coordinatorName: coordName.trim(),
         email: coordEmail.trim(),
@@ -139,7 +142,8 @@ export const EventManagementModal: React.FC<EventManagementModalProps> = ({
       setCoordEmail('');
       setCoordPassword('');
       setShowAddCoord(false);
-      loadEventData();
+      await loadEventData();
+      onEventUpdated();
     } catch (err: any) {
       setCoordError(err.message || 'Failed to add coordinator');
     }
@@ -502,37 +506,41 @@ export const EventManagementModal: React.FC<EventManagementModalProps> = ({
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-white/5 font-mono">
-                    {coordinators.map((c) => (
-                      <tr key={c.coordinatorId} className="hover:bg-white/5">
-                        <td className="py-3 px-4 font-bold text-[#F27D26]">{c.coordinatorId}</td>
-                        <td className="py-3 px-4 font-sans font-medium text-white">
-                          {c.coordinatorName}
-                        </td>
-                        <td className="py-3 px-4 text-white/60">{c.email}</td>
-                        <td className="py-3 px-4">
-                          <span
-                            className={`px-2 py-0.5 rounded text-[10px] ${
-                              c.status === 'ACTIVE'
-                                ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
-                                : 'bg-white/5 text-white/40'
-                            }`}
-                          >
-                            {c.status}
-                          </span>
-                        </td>
-                        <td className="py-3 px-4 text-right">
-                          <button
-                            type="button"
-                            onClick={() => handleDeleteCoordinator(c)}
-                            className="px-2.5 py-1 rounded-lg font-mono text-[11px] font-bold text-red-400 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 hover:border-red-500/40 transition-colors inline-flex items-center gap-1"
-                            title="Delete Coordinator"
-                          >
-                            <Trash2 className="w-3 h-3" />
-                            <span>DELETE</span>
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
+                    {coordinators.filter((c) => !isCoordinatorDeletedClient(c)).map((c) => {
+                      const currentStatus = (c.status || 'ACTIVE').toUpperCase();
+                      const isActive = currentStatus === 'ACTIVE';
+                      return (
+                        <tr key={c.coordinatorId} className="hover:bg-white/5">
+                          <td className="py-3 px-4 font-bold text-[#F27D26]">{c.coordinatorId}</td>
+                          <td className="py-3 px-4 font-sans font-medium text-white">
+                            {c.coordinatorName}
+                          </td>
+                          <td className="py-3 px-4 text-white/60">{c.email}</td>
+                          <td className="py-3 px-4">
+                            <span
+                              className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                isActive
+                                  ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                                  : 'bg-white/5 text-white/40'
+                              }`}
+                            >
+                              {currentStatus}
+                            </span>
+                          </td>
+                          <td className="py-3 px-4 text-right">
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteCoordinator(c)}
+                              className="px-2.5 py-1 rounded-lg font-mono text-[11px] font-bold text-red-400 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 hover:border-red-500/40 transition-colors inline-flex items-center gap-1"
+                              title="Delete Coordinator"
+                            >
+                              <Trash2 className="w-3 h-3" />
+                              <span>DELETE</span>
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
                     {coordinators.length === 0 && (
                       <tr>
                         <td colSpan={5} className="py-8 text-center text-white/40 font-mono">

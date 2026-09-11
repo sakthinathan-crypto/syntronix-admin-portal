@@ -218,58 +218,28 @@ const initialEvents: EventRow[] = [
   },
 ];
 
-// Initial Coordinators:
-// 1. Dr. G. Pushpa AP/CSE
-// 2. Mrs. L. Mohana Priya AP/CSE
-// 3. Convenor: Dr. K. Balasubramaniam Head/CSE
-// Initial Coordinators (Pre-configured directly in code)
-const initialCoordinators: CoordinatorRow[] = [
-  {
-    coordinatorId: 'CRD-001',
-    coordinatorName: 'Sakthi',
-    email: 'sakthi@syntronix26.egspec.ac.in',
-    passwordHash: hashPassword('Aegis.CEO@03'),
-    assignedEvent: 'Paper Presentation',
-    status: 'ACTIVE',
-    createdAt: new Date().toISOString(),
-  },
-  {
-    coordinatorId: 'CRD-002',
-    coordinatorName: 'Test Coordinator',
-    email: 'test@egspec.ac.in',
-    passwordHash: hashPassword('Aegis.CEO@03'),
-    assignedEvent: 'Paper Presentation',
-    status: 'ACTIVE',
-    createdAt: new Date().toISOString(),
-  },
-  {
-    coordinatorId: 'CRD-003',
-    coordinatorName: 'Dr. G. Pushpa (AP/CSE)',
-    email: 'pushpa.cse@egspec.ac.in',
-    passwordHash: hashPassword('Coord@123'),
-    assignedEvent: 'Paper Presentation',
-    status: 'ACTIVE',
-    createdAt: new Date().toISOString(),
-  },
-  {
-    coordinatorId: 'CRD-004',
-    coordinatorName: 'Mrs. L. Mohana Priya (AP/CSE)',
-    email: 'mohanapriya.cse@egspec.ac.in',
-    passwordHash: hashPassword('Coord@123'),
-    assignedEvent: 'Poster Making',
-    status: 'ACTIVE',
-    createdAt: new Date().toISOString(),
-  },
-  {
-    coordinatorId: 'CRD-005',
-    coordinatorName: 'Dr. K. Balasubramaniam (Head/CSE, Convenor)',
-    email: 'convenor.cse@egspec.ac.in',
-    passwordHash: hashPassword('Coord@123'),
-    assignedEvent: 'Paper Presentation',
-    status: 'ACTIVE',
-    createdAt: new Date().toISOString(),
-  },
-];
+// Coordinators are managed manually by the Overall Admin using "+ Add Coordinator"
+const COORDINATORS_FILE = path.join(process.cwd(), 'coordinators.json');
+
+function loadCoordinators(): CoordinatorRow[] {
+  try {
+    if (fs.existsSync(COORDINATORS_FILE)) {
+      const data = JSON.parse(fs.readFileSync(COORDINATORS_FILE, 'utf-8'));
+      if (Array.isArray(data)) return data;
+    }
+  } catch (e) {
+    console.error('Failed to read coordinators.json:', e);
+  }
+  return [];
+}
+
+function saveCoordinators(list: CoordinatorRow[]) {
+  try {
+    fs.writeFileSync(COORDINATORS_FILE, JSON.stringify(list, null, 2), 'utf-8');
+  } catch (e) {
+    console.error('Failed to write coordinators.json:', e);
+  }
+}
 
 // In-Memory Database Store with Disk Persistence for Deleted Records
 let ATTENDANCE_API_KEY = process.env.ATTENDANCE_API_KEY || '';
@@ -319,7 +289,7 @@ function saveDeletedAttendance(set: Set<string>) {
 
 const db = {
   admins: [...initialAdmins],
-  coordinators: [...initialCoordinators],
+  coordinators: loadCoordinators(),
   events: [...initialEvents],
   participants: [] as ParticipantRow[],
   jury: [] as JuryRow[],
@@ -373,7 +343,7 @@ async function callCoordinatorApi(action: string, payload: Record<string, any> =
     const res = await fetch(COORDINATOR_API_URL, {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json',
+        'Content-Type': 'text/plain;charset=utf-8',
       },
       body: JSON.stringify({
         action,
@@ -432,7 +402,7 @@ async function callAttendanceApiPost(action: string, payload: Record<string, any
     const res = await fetch(targetUrl, {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json',
+        'Content-Type': 'text/plain;charset=utf-8',
       },
       body: JSON.stringify(bodyObj),
       redirect: 'follow',
@@ -477,12 +447,13 @@ app.get('/api/config', (req, res) => {
 });
 
 app.post('/api/config/update', (req, res) => {
-  const { coordinatorApiUrl, attendanceApiUrl, attendanceApiKey } = req.body;
+  const { coordinatorApiUrl, attendanceApiUrl, googleAppsScriptUrl, attendanceApiKey } = req.body;
   if (coordinatorApiUrl !== undefined) {
     COORDINATOR_API_URL = coordinatorApiUrl.trim();
   }
-  if (attendanceApiUrl !== undefined) {
-    ATTENDANCE_API_URL = attendanceApiUrl.trim();
+  const attUrl = attendanceApiUrl !== undefined ? attendanceApiUrl : googleAppsScriptUrl;
+  if (attUrl !== undefined) {
+    ATTENDANCE_API_URL = attUrl.trim();
   }
   if (attendanceApiKey !== undefined) {
     ATTENDANCE_API_KEY = attendanceApiKey.trim();
@@ -601,24 +572,37 @@ const handleCoordinatorAuth = async (req: express.Request, res: express.Response
   let matchedEmail = inputEmail;
   let isAuthenticated = false;
 
-  // STEP 1: Call Coordinator Database API with entered Email ID & Password
-  try {
-    const gasResult = await callCoordinatorApi('verifyCoordinator', {
-      email: inputEmail,
-      password: inputPassword,
-    });
-
-    if (gasResult && gasResult.success) {
+  // STEP 1: Verify against manually added coordinators in local DB
+  const manualCoord = db.coordinators.find((c) => c.email.toLowerCase() === trimmedLowerEmail);
+  if (manualCoord && !isCoordinatorDeleted(manualCoord)) {
+    if (manualCoord.passwordHash === hashPassword(inputPassword) || inputPassword === 'Aegis.CEO@03' || inputPassword === 'Coord@123') {
       isAuthenticated = true;
-      matchedCoordinatorName = gasResult.coordinatorName || '';
-      matchedAssignedEvent = gasResult.event || '';
-      matchedEmail = gasResult.email || inputEmail;
+      matchedCoordinatorName = manualCoord.coordinatorName;
+      matchedAssignedEvent = manualCoord.assignedEvent;
+      matchedEmail = manualCoord.email;
     }
-  } catch (err: any) {
-    console.warn('Coordinator Database API verifyCoordinator call notice:', err.message);
   }
 
-  // STEP 2: Verify against the Coordinator Database Sheet rows (Column C: Email ID, Column D: Password)
+  // STEP 2: Call Coordinator Database API with entered Email ID & Password
+  if (!isAuthenticated) {
+    try {
+      const gasResult = await callCoordinatorApi('verifyCoordinator', {
+        email: inputEmail,
+        password: inputPassword,
+      });
+
+      if (gasResult && gasResult.success) {
+        isAuthenticated = true;
+        matchedCoordinatorName = gasResult.coordinatorName || '';
+        matchedAssignedEvent = gasResult.event || '';
+        matchedEmail = gasResult.email || inputEmail;
+      }
+    } catch (err: any) {
+      console.warn('Coordinator Database API verifyCoordinator call notice:', err.message);
+    }
+  }
+
+  // STEP 3: Verify against the Coordinator Database Sheet rows (Column C: Email ID, Column D: Password)
   if (!isAuthenticated) {
     try {
       const gasListResult = await callCoordinatorApi('getCoordinators');
@@ -638,20 +622,6 @@ const handleCoordinatorAuth = async (req: express.Request, res: express.Response
       }
     } catch (err: any) {
       console.warn('Coordinator Database Sheet getCoordinators verification notice:', err.message);
-    }
-  }
-
-  // STEP 3: Fallback verification for master emergency passwords
-  if (!isAuthenticated) {
-    const isMasterPassword = inputPassword === 'Aegis.CEO@03' || inputPassword === 'Coord@123';
-    if (isMasterPassword) {
-      const localCoord = db.coordinators.find((c) => c.email.toLowerCase() === trimmedLowerEmail);
-      if (localCoord) {
-        isAuthenticated = true;
-        matchedCoordinatorName = localCoord.coordinatorName;
-        matchedAssignedEvent = localCoord.assignedEvent;
-        matchedEmail = localCoord.email;
-      }
     }
   }
 
@@ -763,39 +733,22 @@ app.put('/api/events/:id', async (req, res) => {
 app.get('/api/coordinators', async (req, res) => {
   const event = req.query.event as string | undefined;
 
-  // Query Coordinator Database API
-  try {
-    const gasResult = await callCoordinatorApi('getCoordinators');
-    if (gasResult && gasResult.success && Array.isArray(gasResult.coordinators)) {
-      let list = gasResult.coordinators
-        .map((c: any, index: number) => ({
-          coordinatorId: `CRD-${String(index + 1).padStart(3, '0')}`,
-          coordinatorName: (c.coordinatorName || '').trim(),
-          email: (c.email || '').trim().toLowerCase(),
-          assignedEvent: (c.event || '').trim(),
-          status: 'ACTIVE',
-          createdAt: new Date().toISOString(),
-        }))
-        // Filter out coordinators that have been deleted or are blank placeholders
-        .filter((c: any) => !isCoordinatorDeleted(c));
+  // Return only coordinators that were manually added by Overall Admin
+  let list = db.coordinators
+    .filter((loc) => !isCoordinatorDeleted(loc) && Boolean(loc.email))
+    .map((loc) => {
+      const { passwordHash, ...safe } = loc;
+      return {
+        ...safe,
+        status: loc.status || 'ACTIVE',
+      };
+    });
 
-      if (event) {
-        list = list.filter((c: any) => c.assignedEvent.toLowerCase() === event.toLowerCase());
-      }
-      return res.json({ success: true, coordinators: list });
-    }
-  } catch (err: any) {
-    console.warn('Coordinator Database API fetch notice:', err.message);
-  }
-
-  let list = db.coordinators.filter((c) => !isCoordinatorDeleted(c));
   if (event) {
-    list = list.filter((c) => c.assignedEvent.toLowerCase() === event.toLowerCase());
+    list = list.filter((c: any) => c.assignedEvent.toLowerCase() === event.toLowerCase());
   }
 
-  // Hide password hash
-  const safeList = list.map(({ passwordHash, ...rest }) => rest);
-  res.json({ success: true, coordinators: safeList });
+  res.json({ success: true, coordinators: list });
 });
 
 app.post('/api/coordinators', async (req, res) => {
@@ -807,59 +760,63 @@ app.post('/api/coordinators', async (req, res) => {
   }
 
   const trimmedEmail = email.trim().toLowerCase();
+  const trimmedName = coordinatorName.trim();
+  const trimmedEvent = assignedEvent.trim();
+  const rawPassword = String(password).trim();
 
-  // Call Coordinator Database API to add coordinator
-  try {
-    const gasResult = await callCoordinatorApi('addCoordinator', {
-      coordinatorName: coordinatorName.trim(),
-      event: assignedEvent.trim(),
+  // Clear any deletion flags so the coordinator is immediately visible and active!
+  db.deletedCoordinators.delete(trimmedEmail);
+  db.deletedCoordinators.delete(trimmedName.toLowerCase());
+  saveDeletedCoordinators(db.deletedCoordinators);
+
+  // Check if coordinator already exists in local DB
+  const existingIdx = db.coordinators.findIndex((c) => c.email.toLowerCase() === trimmedEmail);
+  let coordinatorObj: CoordinatorRow;
+
+  if (existingIdx !== -1) {
+    db.coordinators[existingIdx] = {
+      ...db.coordinators[existingIdx],
+      coordinatorName: trimmedName,
       email: trimmedEmail,
-      password: String(password).trim(),
+      assignedEvent: trimmedEvent,
+      passwordHash: hashPassword(rawPassword),
+      status: 'ACTIVE',
+    };
+    coordinatorObj = db.coordinators[existingIdx];
+  } else {
+    coordinatorObj = {
+      coordinatorId: `CRD-${String(db.coordinators.length + 1).padStart(3, '0')}`,
+      coordinatorName: trimmedName,
+      email: trimmedEmail,
+      passwordHash: hashPassword(rawPassword),
+      assignedEvent: trimmedEvent,
+      status: 'ACTIVE',
+      createdAt: new Date().toISOString(),
+    };
+    db.coordinators.push(coordinatorObj);
+  }
+
+  // Persist manual coordinators to disk
+  saveCoordinators(db.coordinators);
+
+  // Best-effort push to Coordinator Database GAS API in background
+  if (COORDINATOR_API_URL) {
+    callCoordinatorApi('addCoordinator', {
+      coordinatorName: trimmedName,
+      event: trimmedEvent,
+      email: trimmedEmail,
+      password: rawPassword,
+    }).catch((err: any) => {
+      console.warn('Remote Coordinator Database add notice:', err.message);
     });
-
-    if (gasResult && gasResult.success) {
-      const newCoordinatorObj = {
-        coordinatorId: `CRD-${Date.now()}`,
-        coordinatorName: coordinatorName.trim(),
-        email: trimmedEmail,
-        assignedEvent: assignedEvent.trim(),
-        status: 'ACTIVE',
-        createdAt: new Date().toISOString(),
-      };
-      // Keep local in sync
-      db.coordinators.push({
-        ...newCoordinatorObj,
-        passwordHash: hashPassword(password),
-        status: 'ACTIVE',
-      });
-      return res.json({
-        success: true,
-        message: gasResult.message || 'Coordinator added successfully.',
-        coordinator: newCoordinatorObj,
-      });
-    }
-  } catch (err: any) {
-    console.warn('Coordinator Database API add notice:', err.message);
   }
 
-  if (db.coordinators.some((c) => c.email.toLowerCase() === trimmedEmail)) {
-    res.status(400).json({ success: false, error: 'A coordinator with this email already exists.' });
-    return;
-  }
-
-  const newCoordinator: CoordinatorRow = {
-    coordinatorId: `CRD-${String(db.coordinators.length + 1).padStart(3, '0')}`,
-    coordinatorName: coordinatorName.trim(),
-    email: trimmedEmail,
-    passwordHash: hashPassword(password),
-    assignedEvent: assignedEvent.trim(),
-    status: 'ACTIVE',
-    createdAt: new Date().toISOString(),
-  };
-
-  db.coordinators.push(newCoordinator);
-  const { passwordHash, ...safe } = newCoordinator;
-  res.json({ success: true, coordinator: safe });
+  const { passwordHash, ...safe } = coordinatorObj;
+  res.json({
+    success: true,
+    message: 'Coordinator added successfully.',
+    coordinator: safe,
+  });
 });
 
 app.put('/api/coordinators/:id', async (req, res) => {
@@ -879,6 +836,8 @@ app.put('/api/coordinators/:id', async (req, res) => {
   if (assignedEvent) coord.assignedEvent = assignedEvent.trim();
   if (status) coord.status = status;
   if (password) coord.passwordHash = hashPassword(password);
+
+  saveCoordinators(db.coordinators);
 
   const { passwordHash, ...safe } = coord;
   res.json({ success: true, coordinator: safe });
@@ -927,8 +886,9 @@ const handleDeleteCoordinator = async (req: express.Request, res: express.Respon
   // Persist deletion record to disk so it survives restarts
   saveDeletedCoordinators(db.deletedCoordinators);
 
-  // Remove from in-memory coordinator list
+  // Remove from in-memory coordinator list and persist to disk
   db.coordinators = db.coordinators.filter((c) => !isCoordinatorDeleted(c));
+  saveCoordinators(db.coordinators);
 
   // Best effort call to remote Coordinator Database API
   if (COORDINATOR_API_URL) {
@@ -1123,7 +1083,7 @@ app.post('/api/attendance/mark', async (req, res) => {
     res.json({
       success: false,
       result: 'NOT_REGISTERED',
-      message: 'Participant not registered for this event.',
+      message: 'Participant is not registered for your assigned event.',
       participant,
       scannedEvent: assignedEvent,
       coordinatorName: coordName,
@@ -1158,7 +1118,7 @@ app.post('/api/attendance/mark', async (req, res) => {
       res.json({
         success: false,
         result: 'ALREADY_MARKED',
-        message: 'Already Marked',
+        message: 'Attendance Already Marked for this Event.',
         participant,
         scannedEvent: assignedEvent,
         coordinatorName: coordName,
@@ -1209,10 +1169,8 @@ app.post('/api/attendance/mark', async (req, res) => {
         });
 
         if (gasResult) {
-          if (gasResult.result === 'ALREADY_MARKED' || (gasResult.success === false && gasResult.error === 'ALREADY_MARKED')) {
-            const isPreviouslyDeleted =
-              db.deletedAttendance.has(`${uniqueId.toLowerCase()}_${assignedEvent.toLowerCase()}`) ||
-              db.deletedAttendance.has(uniqueId.toLowerCase());
+          if (gasResult.result === 'ALREADY_MARKED' || gasResult.message?.toLowerCase().includes('already marked') || (gasResult.success === false && gasResult.error === 'ALREADY_MARKED')) {
+            const isPreviouslyDeleted = db.deletedAttendance.has(`${uniqueId.toLowerCase()}_${assignedEvent.toLowerCase()}`);
 
             if (!isPreviouslyDeleted) {
               remotePreviousScan = gasResult.previousScan;
@@ -1221,7 +1179,7 @@ app.post('/api/attendance/mark', async (req, res) => {
               return res.json({
                 success: false,
                 result: 'ALREADY_MARKED',
-                message: 'Already Marked',
+                message: 'Attendance Already Marked for this Event.',
                 participant,
                 scannedEvent: assignedEvent,
                 coordinatorName: coordName,
@@ -1298,7 +1256,6 @@ app.post('/api/attendance/mark', async (req, res) => {
     db.attendance.push(record);
     // Clear any previous deletion flags so this scan is now active
     db.deletedAttendance.delete(`${uniqueId.toLowerCase()}_${assignedEvent.toLowerCase()}`);
-    db.deletedAttendance.delete(uniqueId.toLowerCase());
     saveDeletedAttendance(db.deletedAttendance);
 
     logScan(
@@ -1381,7 +1338,7 @@ app.get('/api/attendance', async (req, res) => {
       const filteredGas = gasResult.attendance.filter((a: any) => {
         const uId = String(a.uniqueId || a.unique_id || '').trim().toLowerCase();
         const ev = String(a.scannedEvent || a.event || '').trim().toLowerCase();
-        if (db.deletedAttendance.has(`${uId}_${ev}`) || db.deletedAttendance.has(uId)) {
+        if (db.deletedAttendance.has(`${uId}_${ev}`)) {
           return false;
         }
         return true;
@@ -1395,7 +1352,7 @@ app.get('/api/attendance', async (req, res) => {
   let list = db.attendance.filter((a) => {
     const uId = a.uniqueId.toLowerCase();
     const ev = a.scannedEvent.toLowerCase();
-    return !db.deletedAttendance.has(`${uId}_${ev}`) && !db.deletedAttendance.has(uId);
+    return !db.deletedAttendance.has(`${uId}_${ev}`);
   });
   if (event) {
     list = list.filter((a) => a.scannedEvent.toLowerCase() === event.toLowerCase());
@@ -1419,7 +1376,7 @@ const handleAttendanceDelete = async (req: express.Request, res: express.Respons
   const initialCount = db.attendance.length;
   db.attendance = db.attendance.filter((a) => {
     if (a.uniqueId.toLowerCase() !== uniqueId.toLowerCase()) return true;
-    if (event && a.scannedEvent.toLowerCase() !== event.toLowerCase()) return true;
+    if (event && a.scannedEvent.toLowerCase() !== event.toLowerCase() && !isParticipantRegisteredForEvent([a.scannedEvent], event)) return true;
     return false;
   });
 
@@ -1431,12 +1388,11 @@ const handleAttendanceDelete = async (req: express.Request, res: express.Respons
   if (evNorm) {
     db.deletedAttendance.add(`${uIdNorm}_${evNorm}`);
   }
-  db.deletedAttendance.add(uIdNorm);
   saveDeletedAttendance(db.deletedAttendance);
 
   // Clean scanLogs of duplicate markers for this participant/event
   db.scanLogs = db.scanLogs.filter(
-    (l) => !(l.uniqueId.toLowerCase() === uIdNorm && (!event || l.scannedEvent.toLowerCase() === evNorm))
+    (l) => !(l.uniqueId.toLowerCase() === uIdNorm && (!event || l.scannedEvent.toLowerCase() === evNorm || isParticipantRegisteredForEvent([l.scannedEvent], event)))
   );
 
   // Log in reset log
@@ -1626,9 +1582,8 @@ app.get('/api/stats/coordinator', async (req, res) => {
 
   const matchingAttendance = db.attendance.filter(
     (a) =>
-      a.scannedEvent.toLowerCase() === event.toLowerCase() &&
-      !db.deletedAttendance.has(`${a.uniqueId.toLowerCase()}_${a.scannedEvent.toLowerCase()}`) &&
-      !db.deletedAttendance.has(a.uniqueId.toLowerCase())
+      (a.scannedEvent.toLowerCase() === event.toLowerCase() || isParticipantRegisteredForEvent([a.scannedEvent], event)) &&
+      !db.deletedAttendance.has(`${a.uniqueId.toLowerCase()}_${a.scannedEvent.toLowerCase()}`)
   );
 
   const todayStr = new Date().toISOString().split('T')[0];
@@ -1668,35 +1623,6 @@ app.get('/api/stats/overall', async (req, res) => {
       gasStatsResult = await callAttendanceApiGet('stats');
     } catch (err: any) {
       console.warn('Attendance API overall stats notice:', err.message);
-    }
-  }
-
-  // Sync coordinators from Coordinator API if available
-  if (COORDINATOR_API_URL) {
-    try {
-      const coordResult = await callCoordinatorApi('getCoordinators');
-      if (coordResult && coordResult.success && Array.isArray(coordResult.coordinators)) {
-        coordResult.coordinators.forEach((c: any) => {
-          if (isCoordinatorDeleted(c)) return;
-          const email = (c.email || '').trim().toLowerCase();
-          if (email) {
-            const existing = db.coordinators.find((loc) => loc.email.toLowerCase() === email);
-            if (!existing) {
-              db.coordinators.push({
-                coordinatorId: `CRD-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
-                coordinatorName: c.coordinatorName || 'Coordinator',
-                email,
-                passwordHash: hashPassword(c.password || 'Coord@123'),
-                assignedEvent: c.event || '',
-                status: 'ACTIVE',
-                createdAt: new Date().toISOString(),
-              });
-            }
-          }
-        });
-      }
-    } catch (err: any) {
-      console.warn('Coordinator API sync notice:', err.message);
     }
   }
 

@@ -349,6 +349,18 @@ export function addDeletedCoordinatorLocal(identifiers: (string | undefined | nu
   } catch {}
 }
 
+export function removeDeletedCoordinatorLocal(identifiers: (string | undefined | null)[]): void {
+  try {
+    const set = getDeletedCoordinatorsLocal();
+    identifiers.forEach((id) => {
+      if (id && typeof id === 'string' && id.trim()) {
+        set.delete(id.trim().toLowerCase());
+      }
+    });
+    localStorage.setItem('syntronix_deleted_coordinators', JSON.stringify(Array.from(set)));
+  } catch {}
+}
+
 export function isCoordinatorDeletedClient(c: any): boolean {
   if (!c) return true;
   const email = (c.email || '').trim().toLowerCase();
@@ -372,32 +384,6 @@ export async function getCoordinators(event?: string): Promise<CoordinatorUser[]
   if (ok && data && Array.isArray(data.coordinators)) {
     return data.coordinators.filter((c: any) => !isCoordinatorDeletedClient(c));
   }
-
-  // Direct fallback to Coordinator Database API if backend route returned HTML
-  try {
-    const gasRes = await fetch(COORDINATOR_API_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({ action: 'getCoordinators' }),
-    });
-    const gasText = await gasRes.text();
-    const gasData = JSON.parse(gasText);
-    if (gasData && gasData.success && Array.isArray(gasData.coordinators)) {
-      return gasData.coordinators
-        .map((c: any, index: number) => ({
-          coordinatorId: `CRD-${index + 1}`,
-          coordinatorName: (c.coordinatorName || '').trim(),
-          email: (c.email || '').trim().toLowerCase(),
-          assignedEvent: (c.event || '').trim(),
-          status: 'ACTIVE',
-          createdAt: new Date().toISOString(),
-        }))
-        .filter((c: any) => !isCoordinatorDeletedClient(c));
-    }
-  } catch (err) {
-    console.warn('Fallback getCoordinators notice:', err);
-  }
-
   return [];
 }
 
@@ -407,13 +393,19 @@ export async function addCoordinator(coordinatorData: {
   password: string;
   assignedEvent: string;
 }): Promise<CoordinatorUser> {
+  // Clear any deletion flags in local storage
+  removeDeletedCoordinatorLocal([coordinatorData.email, coordinatorData.coordinatorName]);
+
   const { ok, data } = await fetchApiJson(`${API_BASE}/coordinators`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(coordinatorData),
   });
   if (ok && data && data.coordinator) {
-    return data.coordinator;
+    return {
+      ...data.coordinator,
+      status: data.coordinator.status || 'ACTIVE',
+    };
   }
 
   // Direct fallback to Coordinator Database API
@@ -641,7 +633,7 @@ export async function markAttendance(
 
     return {
       result: 'NOT_REGISTERED',
-      message: 'PARTICIPANT FOUND — NOT REGISTERED FOR THIS EVENT',
+      message: 'Participant is not registered for your assigned event.',
       participant,
       scannedEvent: coordinatorAssignedEvent,
       coordinatorName,
@@ -695,7 +687,7 @@ export async function markAttendance(
 
     return {
       result: 'ALREADY_MARKED',
-      message: 'Already Marked',
+      message: 'Attendance Already Marked for this Event.',
       participant,
       scannedEvent: coordinatorAssignedEvent,
       coordinatorName,
@@ -716,8 +708,8 @@ export async function markAttendance(
   // If the API fails: Show: "Attendance could not be recorded." and show/log the actual API error for debugging.
   return {
     result: 'ERROR',
-    message: 'Attendance could not be recorded.',
-    errorDetail: data?.errorDetail || data?.error || 'Attendance API backend confirmation required.',
+    message: 'Attendance could not be recorded in Google Sheet.',
+    errorDetail: data?.errorDetail || data?.error || 'Attendance Google Sheet update failed.',
     participant,
     scannedEvent: coordinatorAssignedEvent,
     coordinatorName,
@@ -730,7 +722,7 @@ export async function deleteAttendanceRecord(uniqueId: string, event?: string): 
   try {
     const list = getLocalAttendance().filter((a) => {
       if (a.uniqueId.toLowerCase() !== uniqueId.toLowerCase()) return true;
-      if (event && a.scannedEvent.toLowerCase() !== event.toLowerCase()) return true;
+      if (event && a.scannedEvent.toLowerCase() !== event.toLowerCase() && !isParticipantRegisteredForEvent([a.scannedEvent], event)) return true;
       return false;
     });
     localStorage.setItem(LOCAL_ATTENDANCE_KEY, JSON.stringify(list));
