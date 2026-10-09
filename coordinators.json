@@ -55,7 +55,7 @@
   },
   {
     "coordinatorId": "CRD-007",
-    "coordinatorName": "Sakthinathan J",
+    "coordinatorName": "sakthi",
     "email": "sakthisakthi7791@gmail.com",
     "passwordHash": "5203c677bd28e9cdc55faa0ff008d06cd5b091e779d6a84eec8ab7121a1997e5",
     "assignedEvent": "Paper Presentation",
@@ -97,5 +97,14 @@
     "assignedEvent": "Prompt Fest",
     "status": "ACTIVE",
     "createdAt": "2026-10-09T18:30:59.738Z"
+  },
+  {
+    "coordinatorId": "CRD-012",
+    "coordinatorName": "Aegis Verified Two",
+    "email": "aegis.coord2@egspec.ac.in",
+    "passwordHash": "d9cd33625995ddb996fa7bcea59b6a90260366c9390ccdd0194f8da637fbe1e2",
+    "assignedEvent": "VIBE VISTA",
+    "status": "ACTIVE",
+    "createdAt": "2026-10-09T18:41:41.559Z"
   }
 ]

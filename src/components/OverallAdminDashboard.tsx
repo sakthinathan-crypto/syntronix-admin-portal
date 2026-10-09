@@ -126,13 +126,15 @@ export const OverallAdminDashboard: React.FC<OverallAdminDashboardProps> = ({
   const [syncingCoords, setSyncingCoords] = useState(false);
   const [addCoordError, setAddCoordError] = useState<string | null>(null);
   const [addCoordSuccess, setAddCoordSuccess] = useState<string | null>(null);
+  const [coordsError, setCoordsError] = useState<string | null>(null);
 
   const handleSyncCoordinators = async () => {
     try {
       setSyncingCoords(true);
       setAddCoordError(null);
+      setCoordsError(null);
       const res = await syncCoordinators();
-      if (res && Array.isArray(res.coordinators)) {
+      if (res && Array.isArray(res.coordinators) && res.coordinators.length > 0) {
         setCoordinators(res.coordinators);
       }
       setAddCoordSuccess(res.message || 'Coordinators synchronized successfully from Google Sheet.');
@@ -140,6 +142,7 @@ export const OverallAdminDashboard: React.FC<OverallAdminDashboardProps> = ({
         setAddCoordSuccess(null);
       }, 5000);
     } catch (err: any) {
+      setCoordsError(err.message || 'Failed to synchronize coordinators from Google Sheet.');
       setAddCoordError(err.message || 'Failed to synchronize coordinators from Google Sheet.');
     } finally {
       setSyncingCoords(false);
@@ -291,11 +294,16 @@ export const OverallAdminDashboard: React.FC<OverallAdminDashboardProps> = ({
   const loadAllData = async () => {
     try {
       setLoading(true);
+      setCoordsError(null);
       const [st, ev, att, coords, sLogs, rLogs, parts] = await Promise.all([
         getAdminStats(),
         getEvents(),
         getAttendance(),
-        getCoordinators(),
+        getCoordinators().catch((err: any) => {
+          console.error('[Dashboard] Error fetching coordinators:', err);
+          setCoordsError(err.message || 'Error fetching coordinators from Google Sheets');
+          return [];
+        }),
         getScanLogs(),
         getResetLogs(),
         getParticipants(),
@@ -303,7 +311,9 @@ export const OverallAdminDashboard: React.FC<OverallAdminDashboardProps> = ({
       setStats(st);
       setEvents(ev);
       setAttendance(att);
-      setCoordinators(coords);
+      if (coords && coords.length > 0) {
+        setCoordinators(coords);
+      }
       setScanLogs(sLogs);
       setResetLogs(rLogs);
       setParticipants(parts);
@@ -1549,7 +1559,32 @@ export const OverallAdminDashboard: React.FC<OverallAdminDashboardProps> = ({
                     </tr>
                   );
                 })}
-                {coordinators.filter((c) => !isCoordinatorDeletedClient(c)).length === 0 && (
+                {loading && coordinators.length === 0 && (
+                  <tr>
+                    <td colSpan={6} className="py-8 text-center text-white/50 font-mono">
+                      <div className="flex items-center justify-center gap-2">
+                        <span className="w-4 h-4 border-2 border-[#F27D26] border-t-transparent rounded-full animate-spin" />
+                        <span>Loading coordinators from Google Sheets...</span>
+                      </div>
+                    </td>
+                  </tr>
+                )}
+                {coordsError && coordinators.length === 0 && !loading && (
+                  <tr>
+                    <td colSpan={6} className="py-8 text-center text-red-400 font-mono">
+                      <div className="flex flex-col items-center justify-center gap-2">
+                        <span>Failed to load coordinators: {coordsError}</span>
+                        <button
+                          onClick={handleSyncCoordinators}
+                          className="px-3 py-1 bg-white/10 hover:bg-white/20 text-white rounded-lg text-xs"
+                        >
+                          Retry Sync
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                )}
+                {!loading && !coordsError && coordinators.filter((c) => !isCoordinatorDeletedClient(c)).length === 0 && (
                   <tr>
                     <td colSpan={6} className="py-8 text-center text-white/40 font-mono">
                       No coordinators found in roster.

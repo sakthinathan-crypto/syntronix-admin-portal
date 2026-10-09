@@ -741,8 +741,16 @@ export async function addCoordinator(coordinatorData: {
 
   console.log(`[Coordinator API] Direct Google Apps Script call succeeded. Welcome email status: ${directJson.emailStatus || 'SENT'}`);
 
+  let hash = 0;
+  for (let i = 0; i < trimmedEmail.length; i++) {
+    hash = ((hash << 5) - hash) + trimmedEmail.charCodeAt(i);
+    hash |= 0;
+  }
+  const idSuffix = Math.abs(hash).toString(16).padStart(6, '0').slice(0, 6).toUpperCase();
+  const assignedId = directJson?.coordinatorId || `CRD-${idSuffix}`;
+
   return {
-    coordinatorId: `CRD-${Buffer.from(trimmedEmail.toLowerCase()).toString('hex').slice(0, 6)}`,
+    coordinatorId: assignedId,
     coordinatorName: trimmedName,
     email: trimmedEmail,
     assignedEvent: trimmedEvent,
