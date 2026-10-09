@@ -361,23 +361,38 @@ function handleCoordinatorAuth(params) {
 // ATTENDANCE MARKING WITH CONCURRENCY PROTECTION & STRICT VALIDATION
 // ---------------------------------------------------------------------------
 function handleMarkAttendance(params) {
-  var participant = params.participant;
-  var coordinatorName = params.coordinatorName || "Coordinator";
-  var coordinatorEvent = (params.coordinatorAssignedEvent || "").trim();
+  var participant = params.participant || {
+    uniqueId: params.uniqueId || params.unique_id,
+    name: params.name || params.participantName,
+    universityRegistrationNumber: params.universityRegNumber || params.registrationNo || params.universityRegistrationNumber,
+    email: params.email,
+    mobileNumber: params.mobile || params.mobileNumber,
+    collegeName: params.college || params.collegeName,
+    department: params.department,
+    fieldOfStudy: params.fieldOfStudy,
+    teamName: params.teamName,
+    leaderName: params.leaderName,
+    membersName: params.members || params.membersName,
+    registeredEvents: params.registeredEvents || params.selectedEvents
+  };
+  var coordinatorName = params.coordinatorName || params.coordinator || "Coordinator";
+  var coordinatorEvent = (params.coordinatorAssignedEvent || params.scannedEvent || params.event || "").trim();
 
-  if (!participant || !participant.uniqueId) {
+  if (!participant || (!participant.uniqueId && !participant.unique_id)) {
     logScan("", "Unknown", coordinatorName, coordinatorEvent, coordinatorEvent, "INVALID_QR", "Malformed QR data payload.");
     return { success: false, result: "INVALID_QR", message: "Invalid or incomplete QR data." };
   }
 
-  var uniqueId = String(participant.uniqueId).trim();
+  var uniqueId = String(participant.uniqueId || participant.unique_id).trim();
+  participant.uniqueId = uniqueId;
+  participant.unique_id = uniqueId;
   var participantName = String(participant.name || "").trim();
-  var registeredEvents = participant.registeredEvents || [];
+  var registeredEvents = participant.registeredEvents || participant.selectedEvents || [];
   if (typeof registeredEvents === "string") {
     try {
       registeredEvents = JSON.parse(registeredEvents);
     } catch (e) {
-      registeredEvents = [registeredEvents];
+      registeredEvents = registeredEvents.split(/[,;\n\r|]+/).map(function(s) { return s.trim(); }).filter(Boolean);
     }
   }
 
@@ -873,8 +888,8 @@ function handleGetParticipantAttendance(params) {
 function handleResetAttendance(params) {
   var uniqueId = (params.uniqueId || params.unique_id || "").trim();
   var event = (params.event || params.scannedEvent || "").trim();
-  var adminName = (params.adminName || params.actorName || params.coordinatorName || "Coordinator (Testing Reset)").trim();
-  var reason = (params.reason || "Testing Mode QR Reset").trim();
+  var adminName = (params.adminName || params.actorName || params.coordinatorName || "Overall Admin").trim();
+  var reason = (params.reason || "Overall Admin Attendance Record Removal").trim();
 
   if (!uniqueId) {
     return { success: false, error: "Unique ID is mandatory for QR reset." };
