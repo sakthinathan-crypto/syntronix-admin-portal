@@ -227,6 +227,22 @@ export const ScanResultModal: React.FC<ScanResultModalProps> = ({
             </div>
           )}
 
+          {/* Section 2.5: Error Diagnostic Details (For ERROR) */}
+          {isError && (
+            <div className="p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-xs text-amber-300 space-y-1.5 font-mono">
+              <div className="font-semibold flex items-center gap-1.5 text-amber-400">
+                <AlertTriangle className="w-3.5 h-3.5" />
+                <span>Database Write Error Diagnostic</span>
+              </div>
+              <p className="text-[11px] text-white/80">
+                Reason: <span className="font-bold text-amber-200">{result.errorDetail || result.message || 'API request failed.'}</span>
+              </p>
+              <p className="text-[10px] text-amber-300/70 pt-0.5">
+                Target API: <span className="text-white/60">Attendance Database API</span>
+              </p>
+            </div>
+          )}
+
           {/* Section 3: Registered Events Comparison (For NOT REGISTERED) */}
           {isNotRegistered && participant && (
             <div className="p-4 rounded-2xl bg-red-500/10 border border-red-500/20 space-y-2.5">
