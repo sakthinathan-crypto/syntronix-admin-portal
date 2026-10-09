@@ -56,6 +56,7 @@ import {
   addDeletedCoordinatorLocal,
   removeDeletedCoordinatorLocal,
   addCoordinator,
+  syncCoordinators,
 } from '../services/api';
 import { EventManagementModal } from './EventManagementModal';
 import { ResetAttendanceModal } from './ResetAttendanceModal';
@@ -122,8 +123,28 @@ export const OverallAdminDashboard: React.FC<OverallAdminDashboardProps> = ({
   const [newCoordPassword, setNewCoordPassword] = useState('');
   const [newCoordEvent, setNewCoordEvent] = useState('');
   const [addingCoord, setAddingCoord] = useState(false);
+  const [syncingCoords, setSyncingCoords] = useState(false);
   const [addCoordError, setAddCoordError] = useState<string | null>(null);
   const [addCoordSuccess, setAddCoordSuccess] = useState<string | null>(null);
+
+  const handleSyncCoordinators = async () => {
+    try {
+      setSyncingCoords(true);
+      setAddCoordError(null);
+      const res = await syncCoordinators();
+      if (res && Array.isArray(res.coordinators)) {
+        setCoordinators(res.coordinators);
+      }
+      setAddCoordSuccess(res.message || 'Coordinators synchronized successfully from Google Sheet.');
+      setTimeout(() => {
+        setAddCoordSuccess(null);
+      }, 5000);
+    } catch (err: any) {
+      setAddCoordError(err.message || 'Failed to synchronize coordinators from Google Sheet.');
+    } finally {
+      setSyncingCoords(false);
+    }
+  };
 
   const handleCreateCoordinator = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -137,7 +158,12 @@ export const OverallAdminDashboard: React.FC<OverallAdminDashboardProps> = ({
 
     try {
       setAddingCoord(true);
-      removeDeletedCoordinatorLocal([newCoordEmail.trim(), newCoordName.trim()]);
+      removeDeletedCoordinatorLocal([
+        newCoordEmail.trim(),
+        newCoordName.trim(),
+        newCoordEmail.trim().toLowerCase(),
+        newCoordName.trim().toLowerCase(),
+      ]);
       const added = await addCoordinator({
         coordinatorName: newCoordName.trim(),
         email: newCoordEmail.trim(),
@@ -158,7 +184,11 @@ export const OverallAdminDashboard: React.FC<OverallAdminDashboardProps> = ({
       setNewCoordEvent('');
       setShowAddCoordinatorModal(false);
 
-      // Refresh stats and full roster
+      // Refresh coordinator list and full stats from server
+      const refreshed = await getCoordinators();
+      if (refreshed && refreshed.length > 0) {
+        setCoordinators(refreshed);
+      }
       loadAllData();
       setTimeout(() => {
         setAddCoordSuccess(null);
@@ -1403,24 +1433,36 @@ export const OverallAdminDashboard: React.FC<OverallAdminDashboardProps> = ({
                 Global Coordinators Roster
               </h3>
               <p className="text-xs text-white/40 font-mono">
-                Total Registered Staff: {coordinators.filter((c) => !isCoordinatorDeletedClient(c)).length}
+                Total Registered Staff: {coordinators.length}
               </p>
             </div>
-            <button
-              id="btn-open-add-coordinator-modal"
-              onClick={() => {
-                setAddCoordError(null);
-                setNewCoordName('');
-                setNewCoordEmail('');
-                setNewCoordPassword('');
-                setNewCoordEvent(events[0]?.eventName || '');
-                setShowAddCoordinatorModal(true);
-              }}
-              className="py-2.5 px-4 rounded-xl font-mono text-xs font-bold text-[#070707] bg-[#F27D26] hover:opacity-90 shadow-lg shadow-[#F27D26]/20 active:scale-95 transition-all flex items-center gap-1.5 uppercase tracking-wider"
-            >
-              <Plus className="w-4 h-4 text-[#070707]" />
-              <span>+ ADD COORDINATOR</span>
-            </button>
+            <div className="flex items-center gap-2.5">
+              <button
+                id="btn-sync-coordinators"
+                onClick={handleSyncCoordinators}
+                disabled={syncingCoords}
+                className="py-2.5 px-3.5 rounded-xl font-mono text-xs font-semibold text-white/80 bg-white/5 hover:bg-white/10 border border-white/10 active:scale-95 transition-all flex items-center gap-2"
+                title="Synchronize coordinators from Google Sheet database"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 text-[#F27D26] ${syncingCoords ? 'animate-spin' : ''}`} />
+                <span>{syncingCoords ? 'SYNCING...' : 'SYNC GOOGLE SHEET'}</span>
+              </button>
+              <button
+                id="btn-open-add-coordinator-modal"
+                onClick={() => {
+                  setAddCoordError(null);
+                  setNewCoordName('');
+                  setNewCoordEmail('');
+                  setNewCoordPassword('');
+                  setNewCoordEvent(events[0]?.eventName || 'Paper Presentation');
+                  setShowAddCoordinatorModal(true);
+                }}
+                className="py-2.5 px-4 rounded-xl font-mono text-xs font-bold text-[#070707] bg-[#F27D26] hover:opacity-90 shadow-lg shadow-[#F27D26]/20 active:scale-95 transition-all flex items-center gap-1.5 uppercase tracking-wider"
+              >
+                <Plus className="w-4 h-4 text-[#070707]" />
+                <span>+ ADD COORDINATOR</span>
+              </button>
+            </div>
           </div>
 
           {addCoordSuccess && (

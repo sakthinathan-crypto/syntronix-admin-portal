@@ -533,13 +533,49 @@ export function isCoordinatorDeletedClient(c: any): boolean {
   return false;
 }
 
-export async function getCoordinators(event?: string): Promise<CoordinatorUser[]> {
-  const url = event ? `${API_BASE}/coordinators?event=${encodeURIComponent(event)}` : `${API_BASE}/coordinators`;
+export async function getCoordinators(event?: string, refresh?: boolean): Promise<CoordinatorUser[]> {
+  const params = new URLSearchParams();
+  if (event) params.set('event', event);
+  if (refresh) params.set('refresh', 'true');
+  const qs = params.toString();
+  const url = `${API_BASE}/coordinators${qs ? `?${qs}` : ''}`;
   const { ok, data } = await fetchApiJson(url);
   if (ok && data && Array.isArray(data.coordinators)) {
-    return data.coordinators.filter((c: any) => !isCoordinatorDeletedClient(c));
+    // Clear any local deletion tombstone for active coordinators returned from backend
+    try {
+      const activeIds = data.coordinators
+        .map((c: any) => [c.email, c.coordinatorName, c.coordinatorId])
+        .flat();
+      removeDeletedCoordinatorLocal(activeIds);
+    } catch {}
+    return data.coordinators;
   }
   return [];
+}
+
+export async function syncCoordinators(): Promise<{
+  success: boolean;
+  message: string;
+  coordinators: CoordinatorUser[];
+}> {
+  const { ok, data } = await fetchApiJson(`${API_BASE}/coordinators/sync`, {
+    method: 'POST',
+  });
+  if (ok && data && Array.isArray(data.coordinators)) {
+    try {
+      const activeIds = data.coordinators
+        .map((c: any) => [c.email, c.coordinatorName, c.coordinatorId])
+        .flat();
+      removeDeletedCoordinatorLocal(activeIds);
+    } catch {}
+    return data;
+  }
+  const fallback = await getCoordinators(undefined, true);
+  return {
+    success: true,
+    message: `Synchronized ${fallback.length} coordinator(s) from Coordinator Database.`,
+    coordinators: fallback,
+  };
 }
 
 export async function addCoordinator(coordinatorData: {
@@ -549,7 +585,12 @@ export async function addCoordinator(coordinatorData: {
   assignedEvent: string;
 }): Promise<CoordinatorUser> {
   // Clear any deletion flags in local storage
-  removeDeletedCoordinatorLocal([coordinatorData.email, coordinatorData.coordinatorName]);
+  removeDeletedCoordinatorLocal([
+    coordinatorData.email,
+    coordinatorData.coordinatorName,
+    coordinatorData.email.toLowerCase(),
+    coordinatorData.coordinatorName.toLowerCase(),
+  ]);
 
   const { ok, data } = await fetchApiJson(`${API_BASE}/coordinators`, {
     method: 'POST',

@@ -1,1 +1,56 @@
-[]
+[
+  {
+    "coordinatorId": "CRD-001",
+    "coordinatorName": "Test Coordinator",
+    "email": "testcoord@egspec.ac.in",
+    "passwordHash": "138f8aa760e3fc5ee75b6245781f322f94abe79a7826a573f08a2b595ecd461f",
+    "assignedEvent": "Paper Presentation",
+    "status": "ACTIVE",
+    "createdAt": "2026-10-09T17:37:24.050Z"
+  },
+  {
+    "coordinatorId": "CRD-002",
+    "coordinatorName": "Megna",
+    "email": "megnaishere@gmail.com",
+    "passwordHash": "1cdce007bbdf86142bf8d1752befea17d778202d1329ca4132e469e4e1f7e6bb",
+    "assignedEvent": "Paper Presentation",
+    "status": "ACTIVE",
+    "createdAt": "2026-10-09T17:42:15.891Z"
+  },
+  {
+    "coordinatorId": "CRD-003",
+    "coordinatorName": "Sakthi",
+    "email": "sakthi@example.com",
+    "passwordHash": "9ebf4e5838c90f100a4b24d66d7fd6047aecbb7e825828aec885fb701f09ab5c",
+    "assignedEvent": "Paper Presentation",
+    "status": "ACTIVE",
+    "createdAt": "2026-10-09T17:42:15.891Z"
+  },
+  {
+    "coordinatorId": "CRD-004",
+    "coordinatorName": "sowri",
+    "email": "nsowrirajan29@gmail.com",
+    "passwordHash": "3075f2c3998d9c8219cfc1d3ed5754a73864da95233d3d9166fbffd5c23fb695",
+    "assignedEvent": "Paper Presentation",
+    "status": "ACTIVE",
+    "createdAt": "2026-10-09T17:42:15.891Z"
+  },
+  {
+    "coordinatorId": "CRD-005",
+    "coordinatorName": "Manual Test Coordinator",
+    "email": "manual@egspec.ac.in",
+    "passwordHash": "59c2e9ef9a8531860506029ad64fbcc16b68db2974b6e0f85c718fa7ec546aee",
+    "assignedEvent": "Paper Presentation",
+    "status": "ACTIVE",
+    "createdAt": "2026-10-09T17:42:15.891Z"
+  },
+  {
+    "coordinatorId": "CRD-006",
+    "coordinatorName": "Sakthi",
+    "email": "sakthinathan1977@gmail.com",
+    "passwordHash": "1df6a2434778770192912e7d3598653b542fee198e5af26e34b62c75fe827584",
+    "assignedEvent": "Paper Presentation",
+    "status": "ACTIVE",
+    "createdAt": "2026-10-09T17:43:22.329Z"
+  }
+]

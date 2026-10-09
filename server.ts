@@ -555,6 +555,74 @@ async function callCoordinatorApi(action: string, payload: Record<string, any> =
   }
 }
 
+let lastCoordinatorSync = 0;
+
+// Synchronize coordinators from Google Sheet / Coordinator Database API
+async function syncCoordinatorsFromRemote(): Promise<CoordinatorRow[]> {
+  if (!COORDINATOR_API_URL) return db.coordinators;
+  lastCoordinatorSync = Date.now();
+  try {
+    const gasResult = await callCoordinatorApi('getCoordinators');
+    if (gasResult && gasResult.success && Array.isArray(gasResult.coordinators)) {
+      let changed = false;
+      for (const row of gasResult.coordinators) {
+        const email = String(row.email || '').trim().toLowerCase();
+        const name = String(row.coordinatorName || row.name || '').trim();
+        const event = String(row.event || row.assignedEvent || 'Paper Presentation').trim();
+        const rawPassword = String(row.password || '').trim();
+
+        // Skip invalid rows
+        if (!email && !name) continue;
+        if (email === 'test@example.com' && !name) continue;
+
+        // Skip if deleted by admin
+        if (email && db.deletedCoordinators.has(email)) continue;
+        if (name && db.deletedCoordinators.has(name.toLowerCase())) continue;
+
+        const existingIdx = email
+          ? db.coordinators.findIndex((c) => c.email.toLowerCase() === email)
+          : db.coordinators.findIndex((c) => c.coordinatorName.toLowerCase() === name.toLowerCase());
+
+        if (existingIdx !== -1) {
+          const current = db.coordinators[existingIdx];
+          if (name && current.coordinatorName !== name) {
+            current.coordinatorName = name;
+            changed = true;
+          }
+          if (event && current.assignedEvent !== event) {
+            current.assignedEvent = event;
+            changed = true;
+          }
+          if (rawPassword && !current.passwordHash) {
+            current.passwordHash = hashPassword(rawPassword);
+            changed = true;
+          }
+        } else {
+          const nextNum = db.coordinators.length + 1;
+          const newId = `CRD-${String(nextNum).padStart(3, '0')}`;
+          db.coordinators.push({
+            coordinatorId: newId,
+            coordinatorName: name || 'Coordinator',
+            email: email || `${newId.toLowerCase()}@syntronix.local`,
+            passwordHash: hashPassword(rawPassword || 'Coord@123'),
+            assignedEvent: event || 'Paper Presentation',
+            status: 'ACTIVE',
+            createdAt: new Date().toISOString(),
+          });
+          changed = true;
+        }
+      }
+
+      if (changed) {
+        saveCoordinators(db.coordinators);
+      }
+    }
+  } catch (err: any) {
+    console.warn('Sync coordinators notice:', err.message);
+  }
+  return db.coordinators;
+}
+
 // 2. Attendance & QR API (GET queries)
 async function callAttendanceApiGet(action: string, queryParams: Record<string, string> = {}) {
   if (!ATTENDANCE_API_URL) return null;
@@ -979,8 +1047,19 @@ app.put('/api/events/:id', async (req, res) => {
 // 5. COORDINATORS MANAGEMENT (Overall Admin)
 app.get('/api/coordinators', async (req, res) => {
   const event = req.query.event as string | undefined;
+  const forceSync = req.query.sync === 'true' || req.query.refresh === 'true';
+  const isStale = Date.now() - lastCoordinatorSync > 20000;
 
-  // Return only coordinators that were manually added by Overall Admin
+  // Automatically sync with remote Coordinator Database Google Sheet if list is empty or stale or forceSync requested
+  if (db.coordinators.length === 0 || isStale || forceSync) {
+    try {
+      await Promise.race([
+        syncCoordinatorsFromRemote(),
+        new Promise((resolve) => setTimeout(resolve, 3500)),
+      ]);
+    } catch {}
+  }
+
   let list = db.coordinators
     .filter((loc) => !isCoordinatorDeleted(loc) && Boolean(loc.email))
     .map((loc) => {
@@ -996,6 +1075,28 @@ app.get('/api/coordinators', async (req, res) => {
   }
 
   res.json({ success: true, coordinators: list });
+});
+
+app.post('/api/coordinators/sync', async (req, res) => {
+  try {
+    await syncCoordinatorsFromRemote();
+    const list = db.coordinators
+      .filter((loc) => !isCoordinatorDeleted(loc) && Boolean(loc.email))
+      .map((loc) => {
+        const { passwordHash, ...safe } = loc;
+        return {
+          ...safe,
+          status: loc.status || 'ACTIVE',
+        };
+      });
+    res.json({
+      success: true,
+      message: `Successfully synchronized ${list.length} coordinator(s) from Coordinator Database.`,
+      coordinators: list,
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
 });
 
 app.post('/api/coordinators', async (req, res) => {
@@ -2043,6 +2144,9 @@ async function startServer() {
 
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`[SYNTRONIX '26 Admin Portal Server] Running on http://0.0.0.0:${PORT}`);
+    syncCoordinatorsFromRemote().catch((e: any) =>
+      console.warn('Initial coordinator sync notice:', e.message)
+    );
   });
 }
 
