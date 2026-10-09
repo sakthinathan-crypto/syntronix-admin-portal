@@ -1004,6 +1004,7 @@ export async function markAttendance(
   }
 
   // Fallback direct call to Attendance Database API Web App (for static Vercel deployments)
+  let directErrorDetail: string | null = null;
   try {
     const directRes = await fetch(ATTENDANCE_API_URL, {
       method: 'POST',
@@ -1016,10 +1017,17 @@ export async function markAttendance(
       }),
       redirect: 'follow',
     });
-    if (directRes.ok) {
-      const text = await directRes.text();
-      const json = JSON.parse(text);
-      if (json && json.result) {
+
+    const text = await directRes.text();
+    let json: any = null;
+    try {
+      json = JSON.parse(text);
+    } catch {
+      directErrorDetail = `[HTTP ${directRes.status}] Non-JSON Response: ${text.slice(0, 150)}`;
+    }
+
+    if (json) {
+      if (json.result) {
         if (json.result === 'SUCCESS' && json.attendanceRecord) {
           saveLocalAttendance(json.attendanceRecord);
         }
@@ -1030,8 +1038,12 @@ export async function markAttendance(
           coordinatorName,
         };
       }
+      if (json.success === false || json.error || json.code) {
+        directErrorDetail = `[HTTP ${directRes.status}] ${json.error || json.message || json.code || 'Apps Script returned unsuccessful status'}${json.code ? ` (code: ${json.code})` : ''}`;
+      }
     }
-  } catch (err) {
+  } catch (err: any) {
+    directErrorDetail = `Network / CORS Failure: ${err.message || String(err)}`;
     console.warn('Direct Attendance Database API call notice:', err);
   }
 
@@ -1064,7 +1076,11 @@ export async function markAttendance(
   return {
     result: 'ERROR',
     message: 'Attendance could not be recorded in database.',
-    errorDetail: data?.errorDetail || data?.error || 'Attendance Database API request failed.',
+    errorDetail:
+      data?.errorDetail ||
+      data?.error ||
+      directErrorDetail ||
+      'Attendance Database API write unconfirmed.',
     participant,
     scannedEvent: coordinatorAssignedEvent,
     coordinatorName,
