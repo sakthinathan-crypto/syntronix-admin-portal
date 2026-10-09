@@ -534,22 +534,88 @@ export function isCoordinatorDeletedClient(c: any): boolean {
 }
 
 export async function getCoordinators(event?: string, refresh?: boolean): Promise<CoordinatorUser[]> {
-  const params = new URLSearchParams();
-  if (event) params.set('event', event);
-  if (refresh) params.set('refresh', 'true');
-  const qs = params.toString();
-  const url = `${API_BASE}/coordinators${qs ? `?${qs}` : ''}`;
-  const { ok, data } = await fetchApiJson(url);
-  if (ok && data && Array.isArray(data.coordinators)) {
-    // Clear any local deletion tombstone for active coordinators returned from backend
-    try {
-      const activeIds = data.coordinators
-        .map((c: any) => [c.email, c.coordinatorName, c.coordinatorId])
-        .flat();
-      removeDeletedCoordinatorLocal(activeIds);
-    } catch {}
-    return data.coordinators;
+  // 1. Attempt fetching from backend endpoint
+  try {
+    const params = new URLSearchParams();
+    if (event) params.set('event', event);
+    if (refresh) params.set('refresh', 'true');
+    const qs = params.toString();
+    const url = `${API_BASE}/coordinators${qs ? `?${qs}` : ''}`;
+    const { ok, data } = await fetchApiJson(url);
+    if (ok && data && Array.isArray(data.coordinators) && data.coordinators.length > 0) {
+      try {
+        const activeIds = data.coordinators
+          .map((c: any) => [c.email, c.coordinatorName, c.coordinatorId])
+          .flat();
+        removeDeletedCoordinatorLocal(activeIds);
+      } catch {}
+      return data.coordinators;
+    }
+  } catch (err: any) {
+    console.warn('[Coordinator API] Backend endpoint fetch notice:', err.message);
   }
+
+  // 2. Direct fetch from Google Apps Script Coordinator Web App API
+  try {
+    const directRes = await fetch(COORDINATOR_API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ action: 'getCoordinators' }),
+      redirect: 'follow',
+    });
+
+    if (directRes.ok) {
+      const text = await directRes.text();
+      let json: any = null;
+      try {
+        json = JSON.parse(text);
+      } catch {}
+
+      if (json && json.success && Array.isArray(json.coordinators)) {
+        const seen = new Set<string>();
+        const list: CoordinatorUser[] = [];
+        let num = 1;
+
+        for (const row of json.coordinators) {
+          const email = String(row.email || '').trim().toLowerCase();
+          const name = String(row.coordinatorName || row.name || '').trim();
+          const assignedEvent = String(row.event || row.assignedEvent || 'Paper Presentation').trim();
+
+          if (!email && !name) continue;
+          if (email === 'test@example.com' && !name) continue;
+
+          const key = email || name.toLowerCase();
+          if (seen.has(key)) continue;
+          seen.add(key);
+
+          list.push({
+            coordinatorId: `CRD-${String(num).padStart(3, '0')}`,
+            coordinatorName: name || 'Coordinator',
+            email: email || '',
+            assignedEvent: assignedEvent,
+            status: 'ACTIVE',
+            createdAt: new Date().toISOString(),
+          });
+          num++;
+        }
+
+        try {
+          const activeIds = list
+            .map((c: any) => [c.email, c.coordinatorName, c.coordinatorId])
+            .flat();
+          removeDeletedCoordinatorLocal(activeIds);
+        } catch {}
+
+        if (event) {
+          return list.filter((c) => c.assignedEvent.toLowerCase() === event.toLowerCase());
+        }
+        return list;
+      }
+    }
+  } catch (err: any) {
+    console.error('[Coordinator API] Direct getCoordinators fetch failed:', err.message);
+  }
+
   return [];
 }
 
@@ -558,22 +624,27 @@ export async function syncCoordinators(): Promise<{
   message: string;
   coordinators: CoordinatorUser[];
 }> {
-  const { ok, data } = await fetchApiJson(`${API_BASE}/coordinators/sync`, {
-    method: 'POST',
-  });
-  if (ok && data && Array.isArray(data.coordinators)) {
-    try {
-      const activeIds = data.coordinators
-        .map((c: any) => [c.email, c.coordinatorName, c.coordinatorId])
-        .flat();
-      removeDeletedCoordinatorLocal(activeIds);
-    } catch {}
-    return data;
+  try {
+    const { ok, data } = await fetchApiJson(`${API_BASE}/coordinators/sync`, {
+      method: 'POST',
+    });
+    if (ok && data && Array.isArray(data.coordinators) && data.coordinators.length > 0) {
+      try {
+        const activeIds = data.coordinators
+          .map((c: any) => [c.email, c.coordinatorName, c.coordinatorId])
+          .flat();
+        removeDeletedCoordinatorLocal(activeIds);
+      } catch {}
+      return data;
+    }
+  } catch (err: any) {
+    console.warn('[Coordinator API] Backend sync notice:', err.message);
   }
+
   const fallback = await getCoordinators(undefined, true);
   return {
     success: true,
-    message: `Synchronized ${fallback.length} coordinator(s) from Coordinator Database.`,
+    message: `Synchronized ${fallback.length} coordinator(s) directly from Coordinator Database.`,
     coordinators: fallback,
   };
 }
@@ -584,48 +655,97 @@ export async function addCoordinator(coordinatorData: {
   password: string;
   assignedEvent: string;
 }): Promise<CoordinatorUser> {
+  const trimmedEmail = coordinatorData.email.trim();
+  const trimmedName = coordinatorData.coordinatorName.trim();
+  const trimmedEvent = coordinatorData.assignedEvent.trim();
+  const rawPassword = coordinatorData.password.trim();
+
   // Clear any deletion flags in local storage
   removeDeletedCoordinatorLocal([
-    coordinatorData.email,
-    coordinatorData.coordinatorName,
-    coordinatorData.email.toLowerCase(),
-    coordinatorData.coordinatorName.toLowerCase(),
+    trimmedEmail,
+    trimmedName,
+    trimmedEmail.toLowerCase(),
+    trimmedName.toLowerCase(),
   ]);
 
-  const { ok, data } = await fetchApiJson(`${API_BASE}/coordinators`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(coordinatorData),
-  });
-  if (ok && data && data.coordinator) {
-    return {
-      ...data.coordinator,
-      status: data.coordinator.status || 'ACTIVE',
-    };
-  }
-
-  // Direct fallback to Coordinator Database API
+  // 1. Try backend API proxy route
+  let backendError: string | null = null;
   try {
-    await fetch(COORDINATOR_API_URL, {
+    const { ok, data, isHtmlError } = await fetchApiJson(`${API_BASE}/coordinators`, {
       method: 'POST',
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        action: 'addCoordinator',
-        coordinatorName: coordinatorData.coordinatorName,
-        event: coordinatorData.assignedEvent,
-        email: coordinatorData.email,
-        password: coordinatorData.password,
+        coordinatorName: trimmedName,
+        email: trimmedEmail,
+        password: rawPassword,
+        assignedEvent: trimmedEvent,
       }),
     });
-  } catch (err) {
-    console.warn('Direct addCoordinator notice:', err);
+
+    if (ok && data && data.coordinator) {
+      return {
+        ...data.coordinator,
+        status: data.coordinator.status || 'ACTIVE',
+      };
+    }
+
+    if (!isHtmlError && data && (data.success === false || data.error)) {
+      throw new Error(data.error || data.message || 'Failed to add coordinator.');
+    }
+    backendError = data?.error || 'Backend proxy returned unsuccessful response';
+  } catch (err: any) {
+    // If it was an explicit business error from backend, rethrow it immediately
+    if (err.message && !err.message.includes('fetch') && !err.message.includes('HTTP')) {
+      throw err;
+    }
+    backendError = err.message;
   }
 
+  // 2. Direct submission to Google Apps Script Coordinator Web App API
+  console.log(`[Coordinator API] Falling back to direct Google Apps Script call for: ${trimmedEmail}...`);
+  const payload = {
+    action: 'addCoordinator',
+    coordinatorName: trimmedName,
+    event: trimmedEvent,
+    email: trimmedEmail,
+    password: rawPassword,
+  };
+
+  const directRes = await fetch(COORDINATOR_API_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body: JSON.stringify(payload),
+    redirect: 'follow',
+  });
+
+  if (!directRes.ok) {
+    throw new Error(`Google Apps Script API returned HTTP ${directRes.status}: ${directRes.statusText}`);
+  }
+
+  const directText = await directRes.text();
+  let directJson: any = null;
+  try {
+    directJson = JSON.parse(directText);
+  } catch {
+    throw new Error(`Invalid response received from Coordinator Google Apps Script: ${directText.slice(0, 120)}`);
+  }
+
+  if (!directJson || (directJson.success !== true && directJson.success !== 'true')) {
+    const errMsg =
+      directJson?.error ||
+      directJson?.message ||
+      backendError ||
+      'Google Sheets Coordinator Database did not confirm coordinator creation.';
+    throw new Error(errMsg);
+  }
+
+  console.log(`[Coordinator API] Direct Google Apps Script call succeeded. Welcome email status: ${directJson.emailStatus || 'SENT'}`);
+
   return {
-    coordinatorId: `CRD-${Math.random().toString(36).slice(2, 8)}`,
-    coordinatorName: coordinatorData.coordinatorName,
-    email: coordinatorData.email,
-    assignedEvent: coordinatorData.assignedEvent,
+    coordinatorId: `CRD-${Buffer.from(trimmedEmail.toLowerCase()).toString('hex').slice(0, 6)}`,
+    coordinatorName: trimmedName,
+    email: trimmedEmail,
+    assignedEvent: trimmedEvent,
     status: 'ACTIVE',
     createdAt: new Date().toISOString(),
   };

@@ -177,7 +177,7 @@ export const OverallAdminDashboard: React.FC<OverallAdminDashboardProps> = ({
         return [added, ...filtered];
       });
 
-      setAddCoordSuccess(`Coordinator ${added.coordinatorName} added successfully with ACTIVE status.`);
+      setAddCoordSuccess(`Coordinator ${added.coordinatorName} registered successfully. Welcome email sent.`);
       setNewCoordName('');
       setNewCoordEmail('');
       setNewCoordPassword('');
@@ -185,16 +185,17 @@ export const OverallAdminDashboard: React.FC<OverallAdminDashboardProps> = ({
       setShowAddCoordinatorModal(false);
 
       // Refresh coordinator list and full stats from server
-      const refreshed = await getCoordinators();
+      const refreshed = await getCoordinators(undefined, true);
       if (refreshed && refreshed.length > 0) {
         setCoordinators(refreshed);
       }
       loadAllData();
       setTimeout(() => {
         setAddCoordSuccess(null);
-      }, 5000);
+      }, 6000);
     } catch (err: any) {
-      setAddCoordError(err.message || 'Failed to add coordinator.');
+      console.error('[Add Coordinator Error]:', err);
+      setAddCoordError(err.message || 'Failed to add coordinator to Google Sheets.');
     } finally {
       setAddingCoord(false);
     }

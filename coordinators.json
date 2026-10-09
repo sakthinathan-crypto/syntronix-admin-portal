@@ -61,5 +61,41 @@
     "assignedEvent": "Paper Presentation",
     "status": "ACTIVE",
     "createdAt": "2026-10-09T18:10:14.230Z"
+  },
+  {
+    "coordinatorId": "CRD-008",
+    "coordinatorName": "Diagnose Test",
+    "email": "diagnose.test@syntronix.in",
+    "passwordHash": "36a67d9e4d9fc7ecde4f602e3b21623fed48dddbfae791fe578a53f921c336f1",
+    "assignedEvent": "Paper Presentation",
+    "status": "ACTIVE",
+    "createdAt": "2026-10-09T18:30:55.034Z"
+  },
+  {
+    "coordinatorId": "CRD-009",
+    "coordinatorName": "Browser Test",
+    "email": "browser.test@syntronix.in",
+    "passwordHash": "5c4353c64abba155170ce0ecdf5ab2b23165f1e3fdf011661b4f755b4b919cb3",
+    "assignedEvent": "Paper Presentation",
+    "status": "ACTIVE",
+    "createdAt": "2026-10-09T18:30:55.035Z"
+  },
+  {
+    "coordinatorId": "CRD-010",
+    "coordinatorName": "Redirect Test",
+    "email": "redirect.test@syntronix.in",
+    "passwordHash": "60d3bac41919e759bab7a68500b15dd4a3d11b62955f99873579636f6f2f718d",
+    "assignedEvent": "Paper Presentation",
+    "status": "ACTIVE",
+    "createdAt": "2026-10-09T18:30:55.035Z"
+  },
+  {
+    "coordinatorId": "CRD-011",
+    "coordinatorName": "Aegis Verified Coord",
+    "email": "aegis.coord26@egspec.ac.in",
+    "passwordHash": "cdef7985bed8da5e64671c02fcdf80b2abba7aa85ad44a082b10550be3fa7292",
+    "assignedEvent": "Prompt Fest",
+    "status": "ACTIVE",
+    "createdAt": "2026-10-09T18:30:59.738Z"
   }
 ]

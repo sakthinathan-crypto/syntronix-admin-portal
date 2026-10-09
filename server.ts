@@ -2,7 +2,6 @@ import express from 'express';
 import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
-import { createServer as createViteServer } from 'vite';
 import dotenv from 'dotenv';
 
 dotenv.config();
@@ -388,12 +387,21 @@ const initialEvents: EventRow[] = [
   },
 ];
 
-const EVENTS_FILE = path.join(process.cwd(), 'events.json');
+function getStoragePath(filename: string): string {
+  if (process.env.VERCEL) {
+    return path.join('/tmp', filename);
+  }
+  return path.join(process.cwd(), filename);
+}
+
+const EVENTS_FILE = getStoragePath('events.json');
 
 function loadEvents(): EventRow[] {
   try {
-    if (fs.existsSync(EVENTS_FILE)) {
-      const data = JSON.parse(fs.readFileSync(EVENTS_FILE, 'utf-8'));
+    const srcPath = path.join(process.cwd(), 'events.json');
+    const targetPath = fs.existsSync(EVENTS_FILE) ? EVENTS_FILE : srcPath;
+    if (fs.existsSync(targetPath)) {
+      const data = JSON.parse(fs.readFileSync(targetPath, 'utf-8'));
       if (Array.isArray(data) && data.length > 0) return data;
     }
   } catch (e) {
@@ -411,12 +419,14 @@ function saveEvents(list: EventRow[]) {
 }
 
 // Coordinators are managed manually by the Overall Admin using "+ Add Coordinator"
-const COORDINATORS_FILE = path.join(process.cwd(), 'coordinators.json');
+const COORDINATORS_FILE = getStoragePath('coordinators.json');
 
 function loadCoordinators(): CoordinatorRow[] {
   try {
-    if (fs.existsSync(COORDINATORS_FILE)) {
-      const data = JSON.parse(fs.readFileSync(COORDINATORS_FILE, 'utf-8'));
+    const srcPath = path.join(process.cwd(), 'coordinators.json');
+    const targetPath = fs.existsSync(COORDINATORS_FILE) ? COORDINATORS_FILE : srcPath;
+    if (fs.existsSync(targetPath)) {
+      const data = JSON.parse(fs.readFileSync(targetPath, 'utf-8'));
       if (Array.isArray(data)) return data;
     }
   } catch (e) {
@@ -436,8 +446,8 @@ function saveCoordinators(list: CoordinatorRow[]) {
 // In-Memory Database Store with Disk Persistence for Deleted Records
 let ATTENDANCE_API_KEY = process.env.ATTENDANCE_API_KEY || '';
 
-const DELETED_COORDINATORS_FILE = path.join(process.cwd(), 'deleted_coordinators.json');
-const DELETED_ATTENDANCE_FILE = path.join(process.cwd(), 'deleted_attendance.json');
+const DELETED_COORDINATORS_FILE = getStoragePath('deleted_coordinators.json');
+const DELETED_ATTENDANCE_FILE = getStoragePath('deleted_attendance.json');
 
 function loadDeletedCoordinators(): Set<string> {
   try {
@@ -1112,12 +1122,47 @@ app.post('/api/coordinators', async (req, res) => {
   const trimmedEvent = assignedEvent.trim();
   const rawPassword = String(password).trim();
 
-  // Clear any deletion flags so the coordinator is immediately visible and active!
+  // 1. MUST AWAIT and confirm persistence in Google Sheets via Coordinator Database API
+  let remoteGasResponse: any = null;
+  if (COORDINATOR_API_URL) {
+    try {
+      console.log(`[Coordinator API] Sending addCoordinator to Google Apps Script for: ${trimmedEmail} (${trimmedName})...`);
+      remoteGasResponse = await callCoordinatorApi('addCoordinator', {
+        coordinatorName: trimmedName,
+        event: trimmedEvent,
+        email: trimmedEmail,
+        password: rawPassword,
+      });
+
+      if (!remoteGasResponse || (remoteGasResponse.success !== true && remoteGasResponse.success !== 'true')) {
+        const errorMsg =
+          remoteGasResponse?.error ||
+          remoteGasResponse?.message ||
+          'Google Sheets Coordinator Database did not confirm row creation.';
+        console.error('[Coordinator API] Google Apps Script error:', errorMsg);
+        return res.status(500).json({
+          success: false,
+          error: errorMsg,
+          message: errorMsg,
+        });
+      }
+      console.log(`[Coordinator API] Successfully written to Google Sheets. Welcome email status: ${remoteGasResponse.emailStatus || 'SENT'}`);
+    } catch (err: any) {
+      console.error('[Coordinator API] Network/Execution error calling Google Apps Script:', err.message);
+      return res.status(500).json({
+        success: false,
+        error: `Could not connect to Google Sheets Coordinator API: ${err.message}`,
+        message: `Could not connect to Google Sheets Coordinator API: ${err.message}`,
+      });
+    }
+  }
+
+  // 2. Clear any deletion flags so the coordinator is immediately visible and active!
   db.deletedCoordinators.delete(trimmedEmail);
   db.deletedCoordinators.delete(trimmedName.toLowerCase());
   saveDeletedCoordinators(db.deletedCoordinators);
 
-  // Check if coordinator already exists in local DB
+  // 3. Save to local DB with assigned ID
   const existingIdx = db.coordinators.findIndex((c) => c.email.toLowerCase() === trimmedEmail);
   let coordinatorObj: CoordinatorRow;
 
@@ -1144,25 +1189,14 @@ app.post('/api/coordinators', async (req, res) => {
     db.coordinators.push(coordinatorObj);
   }
 
-  // Persist manual coordinators to disk
+  // Persist coordinators to storage
   saveCoordinators(db.coordinators);
 
-  // Best-effort push to Coordinator Database GAS API in background
-  if (COORDINATOR_API_URL) {
-    callCoordinatorApi('addCoordinator', {
-      coordinatorName: trimmedName,
-      event: trimmedEvent,
-      email: trimmedEmail,
-      password: rawPassword,
-    }).catch((err: any) => {
-      console.warn('Remote Coordinator Database add notice:', err.message);
-    });
-  }
-
   const { passwordHash, ...safe } = coordinatorObj;
-  res.json({
+  return res.json({
     success: true,
-    message: 'Coordinator added successfully.',
+    message: remoteGasResponse?.message || 'Coordinator added successfully. Welcome email sent.',
+    emailStatus: remoteGasResponse?.emailStatus || 'SENT',
     coordinator: safe,
   });
 });
@@ -2129,6 +2163,7 @@ export default app;
 
 async function startServer() {
   if (process.env.NODE_ENV !== 'production') {
+    const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',
