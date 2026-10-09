@@ -1064,6 +1064,38 @@ export async function deleteAttendanceRecord(uniqueId: string, event?: string): 
   return ok && (data?.success ?? true);
 }
 
+// Named alias conforming directly to deleteAttendance requirement
+export const deleteAttendance = deleteAttendanceRecord;
+
+export async function getEventCounts(): Promise<{
+  totalAttendance: number;
+  eventCounts: Record<string, number>;
+  events: Array<{ eventName: string; count: number; totalRegistered: number }>;
+}> {
+  const { ok, data } = await fetchApiJson(`${API_BASE}/attendance/counts`);
+  if (ok && data && data.success) {
+    return {
+      totalAttendance: data.totalAttendance || 0,
+      eventCounts: data.eventCounts || {},
+      events: data.events || [],
+    };
+  }
+  const att = await getAttendance();
+  const counts: Record<string, number> = {};
+  for (const a of att) {
+    counts[a.scannedEvent] = (counts[a.scannedEvent] || 0) + 1;
+  }
+  return {
+    totalAttendance: att.length,
+    eventCounts: counts,
+    events: Object.entries(counts).map(([eventName, count]) => ({
+      eventName,
+      count,
+      totalRegistered: count,
+    })),
+  };
+}
+
 // ---------------------------------------------------------------------------
 // PARTICIPANT CRUD SERVICES
 // ---------------------------------------------------------------------------

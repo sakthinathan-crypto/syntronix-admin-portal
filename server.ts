@@ -489,13 +489,130 @@ function saveDeletedAttendance(set: Set<string>) {
   }
 }
 
+// Dedicated Persistent Attendance Database Store
+const ATTENDANCE_FILE = getStoragePath('attendance.json');
+
+function loadAttendance(): AttendanceRow[] {
+  try {
+    const srcPath = path.join(process.cwd(), 'attendance.json');
+    const targetPath = fs.existsSync(ATTENDANCE_FILE) ? ATTENDANCE_FILE : srcPath;
+    if (fs.existsSync(targetPath)) {
+      const data = JSON.parse(fs.readFileSync(targetPath, 'utf-8'));
+      if (Array.isArray(data)) return data;
+    }
+  } catch (e) {
+    console.error('Failed to read attendance.json:', e);
+  }
+  return [];
+}
+
+function saveAttendance(list: AttendanceRow[]) {
+  try {
+    fs.writeFileSync(ATTENDANCE_FILE, JSON.stringify(list, null, 2), 'utf-8');
+  } catch (e) {
+    console.error('Failed to write attendance.json:', e);
+  }
+}
+
+// Persistent Participants Database Store
+const PARTICIPANTS_FILE = getStoragePath('participants.json');
+
+const initialParticipants: ParticipantRow[] = [
+  {
+    uniqueId: 'SYN26-0012',
+    name: 'Arun Kumar',
+    universityRegistrationNumber: '810022104005',
+    email: 'arun.kumar@gmail.com',
+    mobileNumber: '+91 9876543210',
+    collegeName: 'EGS Pillay Engineering College',
+    fieldOfStudy: 'B.E. Computer Science and Engineering',
+    department: 'CSE',
+    teamName: 'CyberKnights',
+    leaderName: 'Arun Kumar',
+    membersName: 'Kavitha S, Rahul M',
+    selectedEvents: ['Paper Presentation', 'VIBE VISTA'],
+    registeredEvents: ['Paper Presentation', 'VIBE VISTA'],
+    createdAt: new Date().toISOString(),
+  },
+  {
+    uniqueId: 'SYN26-0028',
+    name: 'Pooja Varshini',
+    universityRegistrationNumber: '810022104042',
+    email: 'pooja.v@gmail.com',
+    mobileNumber: '+91 9443218765',
+    collegeName: 'Anjalai Ammal Mahalingam Engineering College',
+    fieldOfStudy: 'B.Tech Information Technology',
+    department: 'IT',
+    teamName: 'TechVision',
+    leaderName: 'Pooja Varshini',
+    membersName: 'Archana R',
+    selectedEvents: ['Prompt Fest'],
+    registeredEvents: ['Prompt Fest'],
+    createdAt: new Date().toISOString(),
+  },
+  {
+    uniqueId: 'SYN26-0035',
+    name: 'Dinesh Karthik',
+    universityRegistrationNumber: '810022104018',
+    email: 'dinesh.k@gmail.com',
+    mobileNumber: '+91 9842109876',
+    collegeName: 'AVC College of Engineering',
+    fieldOfStudy: 'B.E. Computer Science and Engineering',
+    department: 'CSE',
+    teamName: 'CodeBusters',
+    leaderName: 'Dinesh Karthik',
+    membersName: 'Surya P',
+    selectedEvents: ['Prompt Fest', 'FRENZY 2K26'],
+    registeredEvents: ['Prompt Fest', 'FRENZY 2K26'],
+    createdAt: new Date().toISOString(),
+  },
+  {
+    uniqueId: 'SYN26-0041',
+    name: 'Naveen Raj',
+    universityRegistrationNumber: '810022104060',
+    email: 'naveen.raj@gmail.com',
+    mobileNumber: '+91 9789012345',
+    collegeName: 'EGS Pillay Engineering College',
+    fieldOfStudy: 'B.E. Computer Science and Engineering',
+    department: 'CSE',
+    teamName: 'Quantum Coders',
+    leaderName: 'Naveen Raj',
+    membersName: 'Vignesh K, Madhan S',
+    selectedEvents: ['Paper Presentation', 'Prompt Fest', 'VIBE VISTA'],
+    registeredEvents: ['Paper Presentation', 'Prompt Fest', 'VIBE VISTA'],
+    createdAt: new Date().toISOString(),
+  },
+];
+
+function loadParticipants(): ParticipantRow[] {
+  try {
+    const srcPath = path.join(process.cwd(), 'participants.json');
+    const targetPath = fs.existsSync(PARTICIPANTS_FILE) ? PARTICIPANTS_FILE : srcPath;
+    if (fs.existsSync(targetPath)) {
+      const data = JSON.parse(fs.readFileSync(targetPath, 'utf-8'));
+      if (Array.isArray(data) && data.length > 0) return data;
+    }
+  } catch (e) {
+    console.error('Failed to read participants.json:', e);
+  }
+  return [...initialParticipants];
+}
+
+function saveParticipants(list: ParticipantRow[]) {
+  try {
+    fs.writeFileSync(PARTICIPANTS_FILE, JSON.stringify(list, null, 2), 'utf-8');
+  } catch (e) {
+    console.error('Failed to write participants.json:', e);
+  }
+}
+
 const db = {
   admins: [...initialAdmins],
   coordinators: loadCoordinators(),
   events: loadEvents(),
-  participants: [] as ParticipantRow[],
+  participants: loadParticipants(),
   jury: [] as JuryRow[],
-  attendance: [] as AttendanceRow[],
+  attendance: loadAttendance(),
   scanLogs: [] as ScanLogRow[],
   qrResetLogs: [] as QrResetLogRow[],
   systemSettings: {} as Record<string, string>,
@@ -1644,6 +1761,7 @@ app.post('/api/attendance/mark', async (req, res) => {
     };
 
     db.attendance.push(record);
+    saveAttendance(db.attendance);
     // Clear any previous deletion flags so this scan is now active
     db.deletedAttendance.delete(`${uniqueId.toLowerCase()}_${assignedEvent.toLowerCase()}`);
     saveDeletedAttendance(db.deletedAttendance);
@@ -1771,6 +1889,9 @@ const handleAttendanceDelete = async (req: express.Request, res: express.Respons
   });
 
   const deletedCount = initialCount - db.attendance.length;
+  if (deletedCount > 0) {
+    saveAttendance(db.attendance);
+  }
 
   // Track deletion so Google Sheets cached reads or subsequent checks do not treat as marked
   const uIdNorm = uniqueId.toLowerCase();
@@ -2095,6 +2216,40 @@ app.get('/api/stats/overall', async (req, res) => {
       eventWiseAttendance,
       recentScans,
     },
+  });
+});
+
+// Explicit getEventCounts operation
+app.get('/api/attendance/counts', (req, res) => {
+  const activePresent = db.attendance.filter(
+    (a) =>
+      a.attendanceStatus === 'PRESENT' &&
+      !db.deletedAttendance.has(`${a.uniqueId.toLowerCase()}_${a.scannedEvent.toLowerCase()}`)
+  );
+
+  const eventCounts: Record<string, number> = {};
+  for (const ev of db.events) {
+    eventCounts[ev.eventName] = 0;
+  }
+
+  for (const item of activePresent) {
+    const evName = item.scannedEvent;
+    eventCounts[evName] = (eventCounts[evName] || 0) + 1;
+  }
+
+  const breakdown = db.events.map((e) => ({
+    eventName: e.eventName,
+    count: eventCounts[e.eventName] || 0,
+    totalRegistered: db.participants.filter((p) =>
+      isParticipantRegisteredForEvent(p.selectedEvents, e.eventName)
+    ).length,
+  }));
+
+  res.json({
+    success: true,
+    totalAttendance: activePresent.length,
+    eventCounts,
+    events: breakdown,
   });
 });
 

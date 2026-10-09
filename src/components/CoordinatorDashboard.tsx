@@ -67,6 +67,11 @@ export const CoordinatorDashboard: React.FC<CoordinatorDashboardProps> = ({
 
   useEffect(() => {
     fetchDashboardData();
+    // Periodic synchronization every 10 seconds to keep coordinator attendance synchronized
+    const interval = setInterval(() => {
+      fetchDashboardData();
+    }, 10000);
+    return () => clearInterval(interval);
   }, [assignedEvent, refreshTrigger]);
 
   const handleConfirmRemove = async () => {

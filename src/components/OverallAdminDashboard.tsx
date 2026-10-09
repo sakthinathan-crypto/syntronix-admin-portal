@@ -326,6 +326,11 @@ export const OverallAdminDashboard: React.FC<OverallAdminDashboardProps> = ({
 
   useEffect(() => {
     loadAllData();
+    // Periodic synchronization every 10 seconds to keep attendance synchronized
+    const interval = setInterval(() => {
+      loadAllData();
+    }, 10000);
+    return () => clearInterval(interval);
   }, []);
 
   // Filtered attendance records
