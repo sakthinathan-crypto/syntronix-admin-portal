@@ -179,7 +179,6 @@ export default function App() {
         result={scanResult}
         onClose={() => setIsResultOpen(false)}
         onScanNext={handleScanNext}
-        onRemoveAttendance={handleRemoveAttendanceFromScan}
       />
     </div>
   );
