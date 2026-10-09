@@ -1,1105 +1,746 @@
-/**
- * =========================================================================
- * SYNTRONIX '26 — ADMIN PORTAL BACKEND
+/***************************************************************
+ * SYNTRONIX '26 — ADMIN ATTENDANCE DATABASE
  * Google Apps Script Web App for Google Sheets Database
  * Institution: EGS Pillay Engineering College
  * Department: Department of Computer Science and Engineering
  * Designed & Developed by Aegis Academy
- * =========================================================================
- * 
- * SETUP INSTRUCTIONS:
- * 1. Open your Google Drive and create a new Google Sheet named "SYNTRONIX 26 DATABASE".
- * 2. In Google Sheets, click "Extensions" > "Apps Script".
- * 3. Delete any default code in Code.gs and paste this entire file.
- * 4. Click "Deploy" > "New deployment".
- * 5. Select type: "Web app".
- *    - Description: "SYNTRONIX '26 Admin Portal API"
- *    - Execute as: "Me"
- *    - Who has access: "Anyone" (allows the Admin Portal frontend to call the API)
- * 6. Click "Deploy", authorize permissions, and copy the "Web app URL".
- * 7. In the SYNTRONIX Admin Portal, paste this URL into the Backend Configuration.
- * 
- * Note: Running 'initializeDatabase()' once or calling any initial API action
- * will automatically create all 8 required sheets with their exact headers and default records.
- */
+ ***************************************************************/
 
-var SHEETS = {
-  ADMINS: "ADMINS",
-  COORDINATORS: "COORDINATORS",
-  EVENTS: "EVENTS",
-  JURY: "JURY",
-  ATTENDANCE: "ATTENDANCE",
-  SCAN_LOGS: "SCAN LOGS",
-  SYSTEM_SETTINGS: "SYSTEM SETTINGS",
-  QR_RESET_LOGS: "QR RESET LOGS"
+/* ============================================================
+   CONFIGURATION
+   ============================================================ */
+
+const CONFIG = {
+  EVENT_NAME: "SYNTRONIX '26",
+  INSTITUTION: "EGS Pillay Engineering College",
+  DEPARTMENT: "Department of Computer Science and Engineering",
+  API_KEY: "SYN26_ADMIN_7xK92pLm4Q8vZ3",
+
+  // Sheet Names
+  ATTENDANCE_SHEET: "Syntronx'26 Attendance database",
+  SCAN_LOG_SHEET: "Scan Logs",
+  RESET_LOG_SHEET: "QR Reset Logs",
+
+  // Allowed Symposium Events List
+  EVENTS: [
+    "Paper Presentation",
+    "Prompt Fest",
+    "VIBE VISTA",
+    "FRENZY 2K26",
+    "MEMORY HUNT",
+    "THE IMPOSTER GAME",
+    "Online Article Presentation",
+    "Poster Making",
+    "Non-Technical Event 1",
+    "Non-Technical Event 2",
+    "Non-Technical Event 3"
+  ]
 };
 
-function doGet(e) {
-  return handleRequest(e, "GET");
+/* ============================================================
+   SHEET SETUP
+   ============================================================ */
+
+function setupDatabase() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  createAttendanceSheet_(ss);
+  createScanLogSheet_(ss);
+  createResetLogSheet_(ss);
+  return "SYNTRONIX '26 Admin Database Ready";
 }
 
-function doPost(e) {
-  return handleRequest(e, "POST");
-}
-
-function handleRequest(e, method) {
-  var output = { success: false, error: "Invalid request" };
-  try {
-    var params = {};
-    if (e && e.postData && e.postData.contents) {
-      params = JSON.parse(e.postData.contents);
-    } else if (e && e.parameter) {
-      params = e.parameter;
-    }
-
-    var action = params.action || (e && e.parameter && e.parameter.action) || "ping";
-    
-    // Auto initialize sheets if not present
-    ensureSheetsInitialized();
-
-    switch (action) {
-      case "ping":
-      case "health":
-        output = {
-          success: true,
-          status: "ONLINE",
-          timestamp: new Date().toISOString(),
-          event: "SYNTRONIX '26",
-          institution: "EGS Pillay Engineering College",
-          developer: "Designed & Developed by Aegis Academy"
-        };
-        break;
-
-      case "adminAuth":
-        output = handleAdminAuth(params);
-        break;
-
-      case "coordinatorAuth":
-        output = handleCoordinatorAuth(params);
-        break;
-
-      case "getEvents":
-        output = handleGetEvents();
-        break;
-
-      case "createEvent":
-        output = handleCreateEvent(params);
-        break;
-
-      case "updateEvent":
-        output = handleUpdateEvent(params);
-        break;
-
-      case "getCoordinators":
-        output = handleGetCoordinators(params);
-        break;
-
-      case "addCoordinator":
-        output = handleAddCoordinator(params);
-        break;
-
-      case "updateCoordinator":
-        output = handleUpdateCoordinator(params);
-        break;
-
-      case "deactivateCoordinator":
-        output = handleDeactivateCoordinator(params);
-        break;
-
-      case "deleteCoordinator":
-        output = handleDeleteCoordinator(params);
-        break;
-
-      case "getJury":
-        output = handleGetJury(params);
-        break;
-
-      case "addJury":
-        output = handleAddJury(params);
-        break;
-
-      case "updateJury":
-        output = handleUpdateJury(params);
-        break;
-
-      case "deactivateJury":
-        output = handleDeactivateJury(params);
-        break;
-
-      case "markAttendance":
-        output = handleMarkAttendance(params);
-        break;
-
-      case "getAttendance":
-        output = handleGetAttendance(params);
-        break;
-
-      case "getParticipantAttendance":
-        output = handleGetParticipantAttendance(params);
-        break;
-
-      case "getSystemStats":
-        output = handleGetSystemStats();
-        break;
-
-      case "getCoordinatorStats":
-        output = handleGetCoordinatorStats(params);
-        break;
-
-      case "getScanLogs":
-        output = handleGetScanLogs(params);
-        break;
-
-      case "resetAttendance":
-      case "deleteAttendance":
-      case "removeAttendance":
-        output = handleResetAttendance(params);
-        break;
-
-      default:
-        output = { success: false, error: "Action '" + action + "' not recognized." };
-    }
-  } catch (err) {
-    output = { success: false, error: err.toString() };
+function createAttendanceSheet_(ss) {
+  let sheet = ss.getSheetByName(CONFIG.ATTENDANCE_SHEET) || ss.getSheetByName("ATTENDANCE");
+  if (!sheet) {
+    sheet = ss.insertSheet(CONFIG.ATTENDANCE_SHEET);
   }
 
-  return ContentService.createTextOutput(JSON.stringify(output))
-    .setMimeType(ContentService.MimeType.JSON);
-}
-
-// ---------------------------------------------------------------------------
-// INITIALIZATION & SCHEMA DEFINITION
-// ---------------------------------------------------------------------------
-function ensureSheetsInitialized() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-
-  // 1. ADMINS
-  var adminSheet = getOrCreateSheet(ss, SHEETS.ADMINS, [
-    "Admin ID", "Admin Name", "Email", "Password Hash", "Role", "Status", "Created At"
-  ]);
-  if (adminSheet.getLastRow() <= 1) {
-    // Initialize default Overall Admin: Sakthinathan / Aegis.CEO@03
-    var defaultHash = hashPassword("Aegis.CEO@03");
-    adminSheet.appendRow([
-      "ADM-001",
-      "Sakthinathan",
-      "admin@syntronix26.egspec.ac.in",
-      defaultHash,
-      "OVERALL_ADMIN",
-      "ACTIVE",
-      new Date().toISOString()
+  if (sheet.getLastRow() === 0) {
+    sheet.appendRow([
+      "Timestamp",
+      "Unique ID",
+      "Participant Name",
+      "University Registration Number",
+      "Email",
+      "Mobile Number",
+      "College Name",
+      "Field of Study",
+      "Department",
+      "Team Name",
+      "Leader Name",
+      "Members Name(s)",
+      "Event",
+      "Coordinator Name",
+      "Attendance Date",
+      "Attendance Time",
+      "Attendance Status",
+      "QR Status"
     ]);
   }
+  formatHeader_(sheet);
+}
 
-  // 2. EVENTS
-  var eventsSheet = getOrCreateSheet(ss, SHEETS.EVENTS, [
-    "Event ID", "Event Name", "Category", "Status", "Created At", "Description"
-  ]);
-  if (eventsSheet.getLastRow() <= 1) {
-    var initialEvents = [
-      ["EVT-001", "Paper Presentation", "TECHNICAL", "ACTIVE", new Date().toISOString(), "Technical Paper Presentation on emerging technologies"],
-      ["EVT-002", "Poster Making", "TECHNICAL", "ACTIVE", new Date().toISOString(), "Creative poster designing and technical exhibition"],
-      ["EVT-003", "Non-Technical Event 1", "NON_TECHNICAL", "ACTIVE", new Date().toISOString(), "Temporary placeholder - Editable by Overall Admin"],
-      ["EVT-004", "Non-Technical Event 2", "NON_TECHNICAL", "ACTIVE", new Date().toISOString(), "Temporary placeholder - Editable by Overall Admin"],
-      ["EVT-005", "Non-Technical Event 3", "NON_TECHNICAL", "ACTIVE", new Date().toISOString(), "Temporary placeholder - Editable by Overall Admin"]
-    ];
-    for (var i = 0; i < initialEvents.length; i++) {
-      eventsSheet.appendRow(initialEvents[i]);
+function createScanLogSheet_(ss) {
+  let sheet = ss.getSheetByName(CONFIG.SCAN_LOG_SHEET) || ss.getSheetByName("SCAN LOGS");
+  if (!sheet) {
+    sheet = ss.insertSheet(CONFIG.SCAN_LOG_SHEET);
+  }
+
+  if (sheet.getLastRow() === 0) {
+    sheet.appendRow([
+      "Timestamp",
+      "Unique ID",
+      "Participant Name",
+      "Coordinator Name",
+      "Event",
+      "Result",
+      "Message"
+    ]);
+  }
+  formatHeader_(sheet);
+}
+
+function createResetLogSheet_(ss) {
+  let sheet = ss.getSheetByName(CONFIG.RESET_LOG_SHEET) || ss.getSheetByName("QR RESET LOGS");
+  if (!sheet) {
+    sheet = ss.insertSheet(CONFIG.RESET_LOG_SHEET);
+  }
+
+  if (sheet.getLastRow() === 0) {
+    sheet.appendRow([
+      "Timestamp",
+      "Unique ID",
+      "Admin Name",
+      "Reason",
+      "Previous QR Status",
+      "New QR Status"
+    ]);
+  }
+  formatHeader_(sheet);
+}
+
+function formatHeader_(sheet) {
+  const lastColumn = sheet.getLastColumn();
+  if (lastColumn < 1) return;
+  sheet.getRange(1, 1, 1, lastColumn).setFontWeight("bold");
+  sheet.setFrozenRows(1);
+  sheet.autoResizeColumns(1, lastColumn);
+}
+
+/* ============================================================
+   WEB APP — GET
+   ============================================================ */
+
+function doGet(e) {
+  try {
+    const params = e && e.parameter ? e.parameter : {};
+    const action = params.action || "status";
+
+    switch (action) {
+      case "status":
+      case "ping":
+      case "health":
+        return jsonResponse_({
+          success: true,
+          system: "SYNTRONIX '26 Admin Database",
+          status: "ONLINE",
+          version: "1.0.0"
+        });
+
+      case "stats":
+        return getStats_();
+
+      case "attendance":
+      case "getAttendance":
+      case "getAllAttendance":
+        return getAttendanceRecords_(params.uniqueId, params.event || params.scannedEvent);
+
+      default:
+        return jsonResponse_({
+          success: false,
+          error: "Unknown GET action"
+        });
+    }
+  } catch (error) {
+    return jsonResponse_({
+      success: false,
+      error: error.message
+    });
+  }
+}
+
+/* ============================================================
+   WEB APP — POST
+   ============================================================ */
+
+function doPost(e) {
+  try {
+    if (!e || !e.postData) {
+      return jsonResponse_({
+        success: false,
+        error: "No POST data received"
+      });
+    }
+
+    let data;
+    try {
+      data = JSON.parse(e.postData.contents);
+    } catch (jsonError) {
+      data = e.parameter || {};
+    }
+
+    /*
+     * API KEY CHECK
+     */
+    if (String(data.apiKey || "") !== CONFIG.API_KEY) {
+      return jsonResponse_({
+        success: false,
+        code: "UNAUTHORIZED",
+        error: "Invalid API key"
+      });
+    }
+
+    const action = String(data.action || "");
+
+    switch (action) {
+      case "markAttendance":
+        return markAttendance_(data);
+
+      case "checkQR":
+        return checkQR_(data);
+
+      case "deleteAttendance":
+      case "removeAttendance":
+      case "deleteAttendanceRecord":
+        return deleteAttendance_(data);
+
+      case "resetQR":
+      case "resetAttendance":
+        return resetQR_(data);
+
+      default:
+        return jsonResponse_({
+          success: false,
+          error: "Unknown action"
+        });
+    }
+  } catch (error) {
+    return jsonResponse_({
+      success: false,
+      error: error.message
+    });
+  }
+}
+
+/* ============================================================
+   CHECK QR
+   ============================================================ */
+
+function checkQR_(data) {
+  const uniqueId = normalizeUniqueId_(data.uniqueId);
+  const eventName = clean_(data.eventName || data.event || data.scannedEvent);
+
+  if (!uniqueId) {
+    return jsonResponse_({
+      success: false,
+      code: "INVALID_QR",
+      error: "Unique ID is missing"
+    });
+  }
+
+  const sheet = getAttendanceSheet_();
+  const existing = findParticipantRecord_(sheet, uniqueId, eventName);
+
+  if (existing) {
+    return jsonResponse_({
+      success: true,
+      code: "QR_ALREADY_USED",
+      qrStatus: "USED",
+      message: "This QR code has already been used for this event.",
+      previousRecord: existing
+    });
+  }
+
+  return jsonResponse_({
+    success: true,
+    code: "QR_UNUSED",
+    qrStatus: "UNUSED",
+    message: "QR code is valid and unused for this event."
+  });
+}
+
+/* ============================================================
+   MARK ATTENDANCE
+   ============================================================ */
+
+function markAttendance_(data) {
+  const participant = {
+    name: clean_(data.name || data.participantName),
+    regNo: clean_(data.regNo || data.registrationNo || data.universityRegistrationNumber),
+    email: clean_(data.email),
+    mobile: clean_(data.mobile || data.mobileNumber),
+    college: clean_(data.college || data.collegeName),
+    fieldOfStudy: clean_(data.fieldOfStudy),
+    department: clean_(data.department),
+    teamName: clean_(data.teamName),
+    leaderName: clean_(data.leaderName),
+    membersName: clean_(data.membersName || data.members),
+    uniqueId: normalizeUniqueId_(data.uniqueId || data.unique_id)
+  };
+
+  const coordinatorName = clean_(data.coordinatorName || data.coordinator);
+  const eventName = clean_(data.eventName || data.scannedEvent || data.event);
+
+  if (!participant.uniqueId) {
+    return jsonResponse_({
+      success: false,
+      code: "INVALID_QR",
+      error: "Unique ID is missing from QR."
+    });
+  }
+
+  if (!coordinatorName) {
+    return jsonResponse_({
+      success: false,
+      code: "COORDINATOR_REQUIRED",
+      error: "Coordinator name is required."
+    });
+  }
+
+  if (!eventName) {
+    return jsonResponse_({
+      success: false,
+      code: "EVENT_REQUIRED",
+      error: "Event name is required."
+    });
+  }
+
+  if (CONFIG.EVENTS.indexOf(eventName) === -1) {
+    return jsonResponse_({
+      success: false,
+      code: "INVALID_EVENT",
+      error: "Invalid event selected: " + eventName
+    });
+  }
+
+  const lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(15000);
+  } catch (error) {
+    return jsonResponse_({
+      success: false,
+      code: "SERVER_BUSY",
+      error: "Please try scanning again."
+    });
+  }
+
+  try {
+    const sheet = getAttendanceSheet_();
+
+    /*
+     * CHECK WHETHER ATTENDANCE HAS ALREADY BEEN MARKED FOR THIS SPECIFIC EVENT
+     */
+    const existing = findParticipantRecord_(sheet, participant.uniqueId, eventName);
+
+    if (existing) {
+      logScan_({
+        uniqueId: participant.uniqueId,
+        participantName: participant.name,
+        coordinatorName: coordinatorName,
+        eventName: eventName,
+        result: "REJECTED",
+        message: "QR ALREADY USED FOR THIS EVENT"
+      });
+
+      return jsonResponse_({
+        success: false,
+        code: "QR_ALREADY_USED",
+        qrStatus: "USED",
+        message: "QR ALREADY USED FOR THIS EVENT",
+        previousRecord: existing
+      });
+    }
+
+    const now = new Date();
+    const timezone = SpreadsheetApp.getActiveSpreadsheet().getSpreadsheetTimeZone();
+    const attendanceDate = Utilities.formatDate(now, timezone, "dd-MM-yyyy");
+    const attendanceTime = Utilities.formatDate(now, timezone, "hh:mm:ss a");
+
+    sheet.appendRow([
+      now,
+      participant.uniqueId,
+      participant.name,
+      participant.regNo,
+      participant.email,
+      participant.mobile,
+      participant.college,
+      participant.fieldOfStudy,
+      participant.department,
+      participant.teamName,
+      participant.leaderName,
+      participant.membersName,
+      eventName,
+      coordinatorName,
+      attendanceDate,
+      attendanceTime,
+      "PRESENT",
+      "USED"
+    ]);
+
+    SpreadsheetApp.flush();
+
+    logScan_({
+      uniqueId: participant.uniqueId,
+      participantName: participant.name,
+      coordinatorName: coordinatorName,
+      eventName: eventName,
+      result: "SUCCESS",
+      message: "Attendance marked"
+    });
+
+    return jsonResponse_({
+      success: true,
+      code: "ATTENDANCE_MARKED",
+      message: "Attendance marked successfully.",
+      participant: participant,
+      attendance: {
+        event: eventName,
+        coordinator: coordinatorName,
+        date: attendanceDate,
+        time: attendanceTime,
+        status: "PRESENT",
+        qrStatus: "USED"
+      }
+    });
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/* ============================================================
+   REAL ATTENDANCE DELETION (ROW DELETED FROM GOOGLE SHEET)
+   ============================================================ */
+
+function deleteAttendance_(data) {
+  const uniqueId = normalizeUniqueId_(data.uniqueId || data.unique_id);
+  const eventName = clean_(data.eventName || data.event || data.scannedEvent);
+  const adminName = clean_(data.adminName || "Overall Admin");
+
+  if (!uniqueId) {
+    return jsonResponse_({
+      success: false,
+      code: "INVALID_PARAM",
+      error: "Unique ID is required for deletion."
+    });
+  }
+
+  const lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(15000);
+  } catch (e) {
+    return jsonResponse_({
+      success: false,
+      code: "SERVER_BUSY",
+      error: "Server busy, please try deletion again."
+    });
+  }
+
+  try {
+    const sheet = getAttendanceSheet_();
+    const values = sheet.getDataRange().getValues();
+    if (values.length < 2) {
+      return jsonResponse_({
+        success: false,
+        code: "RECORD_NOT_FOUND",
+        error: "No attendance records exist in database."
+      });
+    }
+
+    const targetEventNorm = eventName ? eventName.toLowerCase() : null;
+    let deletedCount = 0;
+    let deletedRowDetails = null;
+
+    for (let i = values.length - 1; i >= 1; i--) {
+      const row = values[i];
+      const rowUniqueId = normalizeUniqueId_(row[1]);
+      const rowEventNorm = clean_(row[12]).toLowerCase();
+
+      if (rowUniqueId === uniqueId && (!targetEventNorm || rowEventNorm === targetEventNorm)) {
+        deletedRowDetails = {
+          uniqueId: row[1],
+          participantName: row[2],
+          event: row[12],
+          coordinator: row[13]
+        };
+        sheet.deleteRow(i + 1); // Delete actual row from Google Sheet
+        deletedCount++;
+        if (targetEventNorm) break; // Delete single matching event row
+      }
+    }
+
+    SpreadsheetApp.flush();
+
+    if (deletedCount > 0) {
+      logScan_({
+        uniqueId: uniqueId,
+        participantName: deletedRowDetails ? deletedRowDetails.participantName : "Participant",
+        coordinatorName: adminName,
+        eventName: eventName || "ALL",
+        result: "DELETED",
+        message: "Attendance row deleted by Overall Admin. QR re-eligible for scanning."
+      });
+
+      return jsonResponse_({
+        success: true,
+        code: "ATTENDANCE_DELETED",
+        message: "Attendance record deleted successfully from Google Sheet database.",
+        deletedCount: deletedCount,
+        uniqueId: uniqueId,
+        event: eventName
+      });
+    }
+
+    return jsonResponse_({
+      success: false,
+      code: "RECORD_NOT_FOUND",
+      error: "No matching attendance record found for " + uniqueId + (eventName ? " in " + eventName : "")
+    });
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/* ============================================================
+   FIND EXISTING QR RECORD BY UNIQUE ID & EVENT
+   ============================================================ */
+
+function findParticipantRecord_(sheet, uniqueId, eventName) {
+  const values = sheet.getDataRange().getValues();
+  if (values.length < 2) return null;
+
+  const targetEventNorm = clean_(eventName).toLowerCase();
+
+  for (let i = 1; i < values.length; i++) {
+    const row = values[i];
+    const rowUniqueId = normalizeUniqueId_(row[1]);
+    const rowEventNorm = clean_(row[12]).toLowerCase();
+
+    if (rowUniqueId === uniqueId && (!eventName || rowEventNorm === targetEventNorm)) {
+      return {
+        timestamp: row[0],
+        uniqueId: row[1],
+        participantName: row[2],
+        regNo: row[3],
+        email: row[4],
+        mobile: row[5],
+        college: row[6],
+        fieldOfStudy: row[7],
+        department: row[8],
+        teamName: row[9],
+        leaderName: row[10],
+        membersName: row[11],
+        event: row[12],
+        coordinator: row[13],
+        date: row[14],
+        time: row[15],
+        status: row[16],
+        qrStatus: row[17]
+      };
+    }
+  }
+  return null;
+}
+
+/* ============================================================
+   GET ATTENDANCE RECORDS (ALL OR FILTERED BY UNIQUE ID / EVENT)
+   ============================================================ */
+
+function getAttendanceRecords_(uniqueId, eventFilter) {
+  const sheet = getAttendanceSheet_();
+  const values = sheet.getDataRange().getValues();
+  if (values.length < 2) {
+    return jsonResponse_({
+      success: true,
+      totalCount: 0,
+      records: [],
+      attendance: []
+    });
+  }
+
+  const results = [];
+  const targetId = uniqueId ? normalizeUniqueId_(uniqueId) : null;
+  const targetEvent = eventFilter ? clean_(eventFilter).toLowerCase() : null;
+
+  for (let i = 1; i < values.length; i++) {
+    const row = values[i];
+    const rowId = normalizeUniqueId_(row[1]);
+    const rowEvent = clean_(row[12]);
+
+    if (targetId && rowId !== targetId) continue;
+    if (targetEvent && rowEvent.toLowerCase() !== targetEvent) continue;
+
+    results.push({
+      timestamp: row[0],
+      uniqueId: row[1],
+      participantName: row[2],
+      registrationNo: row[3],
+      regNo: row[3],
+      universityRegNumber: row[3],
+      email: row[4],
+      mobile: row[5],
+      mobileNumber: row[5],
+      college: row[6],
+      collegeName: row[6],
+      fieldOfStudy: row[7],
+      department: row[8],
+      teamName: row[9],
+      leaderName: row[10],
+      membersName: row[11],
+      event: row[12],
+      scannedEvent: row[12],
+      eventName: row[12],
+      coordinator: row[13],
+      coordinatorName: row[13],
+      date: row[14],
+      attendanceDate: row[14],
+      time: row[15],
+      attendanceTime: row[15],
+      status: row[16],
+      attendanceStatus: row[16],
+      qrStatus: row[17]
+    });
+  }
+
+  return jsonResponse_({
+    success: true,
+    totalCount: results.length,
+    records: results,
+    attendance: results
+  });
+}
+
+/* ============================================================
+   PARTICIPANT ATTENDANCE HISTORY
+   ============================================================ */
+
+function getParticipantAttendance_(uniqueId) {
+  return getAttendanceRecords_(uniqueId, null);
+}
+
+/* ============================================================
+   DASHBOARD STATISTICS
+   ============================================================ */
+
+function getStats_() {
+  const sheet = getAttendanceSheet_();
+  const values = sheet.getDataRange().getValues();
+  const totalAttendance = Math.max(0, values.length - 1);
+  const eventCounts = {};
+
+  CONFIG.EVENTS.forEach(event => {
+    eventCounts[event] = 0;
+  });
+
+  const coordinatorCounts = {};
+
+  for (let i = 1; i < values.length; i++) {
+    const event = String(values[i][12] || "");
+    const coordinator = String(values[i][13] || "");
+
+    if (eventCounts[event] !== undefined) {
+      eventCounts[event]++;
+    }
+
+    if (coordinator) {
+      if (!coordinatorCounts[coordinator]) {
+        coordinatorCounts[coordinator] = 0;
+      }
+      coordinatorCounts[coordinator]++;
     }
   }
 
-  // 3. COORDINATORS
-  var coordSheet = getOrCreateSheet(ss, SHEETS.COORDINATORS, [
-    "Coordinator ID", "Coordinator Name", "Email", "Password Hash", "Assigned Event", "Status", "Created At", "Last Login"
-  ]);
-  if (coordSheet.getLastRow() <= 1) {
-    var defaultCoordHash = hashPassword("Coord@123");
-    var initialCoords = [
-      ["CRD-001", "Dr. G. Pushpa (AP/CSE)", "pushpa.cse@egspec.ac.in", defaultCoordHash, "Paper Presentation", "ACTIVE", new Date().toISOString(), ""],
-      ["CRD-002", "Mrs. L. Mohana Priya (AP/CSE)", "mohanapriya.cse@egspec.ac.in", defaultCoordHash, "Poster Making", "ACTIVE", new Date().toISOString(), ""],
-      ["CRD-003", "Dr. K. Balasubramaniam (Head/CSE, Convenor)", "convenor.cse@egspec.ac.in", defaultCoordHash, "Paper Presentation", "ACTIVE", new Date().toISOString(), ""]
-    ];
-    for (var j = 0; j < initialCoords.length; j++) {
-      coordSheet.appendRow(initialCoords[j]);
+  return jsonResponse_({
+    success: true,
+    stats: {
+      totalAttendance: totalAttendance,
+      eventWise: eventCounts,
+      coordinatorWise: coordinatorCounts
     }
-  }
+  });
+}
 
-  // 4. JURY
-  getOrCreateSheet(ss, SHEETS.JURY, [
-    "Jury ID", "Jury Name", "Event", "Status", "Created At"
-  ]);
+/* ============================================================
+   RESET QR LOGGING (ADMIN COMPATIBILITY)
+   ============================================================ */
 
-  // 5. ATTENDANCE
-  getOrCreateSheet(ss, SHEETS.ATTENDANCE, [
-    "Timestamp", "Unique ID", "Participant Name", "University Registration Number",
-    "Email", "Mobile Number", "College Name", "Field of Study", "Department",
-    "Team Name", "Leader Name", "Members Name(s)", "Registered Events",
-    "Scanned Event", "Coordinator Name", "Attendance Date", "Attendance Time", "Attendance Status"
-  ]);
+function resetQR_(data) {
+  return deleteAttendance_(data);
+}
 
-  // 6. SCAN LOGS
-  getOrCreateSheet(ss, SHEETS.SCAN_LOGS, [
-    "Timestamp", "Unique ID", "Participant Name", "Coordinator Name",
-    "Coordinator Assigned Event", "Scanned Event", "Result", "Message"
-  ]);
+/* ============================================================
+   SCAN LOG
+   ============================================================ */
 
-  // 7. SYSTEM SETTINGS
-  getOrCreateSheet(ss, SHEETS.SYSTEM_SETTINGS, [
-    "Key", "Value", "Updated At"
-  ]);
-
-  // 8. QR RESET LOGS
-  getOrCreateSheet(ss, SHEETS.QR_RESET_LOGS, [
-    "Timestamp", "Unique ID", "Admin Name", "Reason", "Previous Status", "New Status", "Event"
+function logScan_(data) {
+  const sheet = getScanLogSheet_();
+  sheet.appendRow([
+    new Date(),
+    data.uniqueId,
+    data.participantName,
+    data.coordinatorName,
+    data.eventName,
+    data.result,
+    data.message
   ]);
 }
 
-function getOrCreateSheet(ss, name, headers) {
-  var sheet = ss.getSheetByName(name);
+/* ============================================================
+   GET SHEETS
+   ============================================================ */
+
+function getAttendanceSheet_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName(CONFIG.ATTENDANCE_SHEET) || ss.getSheetByName("ATTENDANCE");
   if (!sheet) {
-    sheet = ss.insertSheet(name);
-    if (headers && headers.length > 0) {
-      sheet.appendRow(headers);
-      sheet.getRange(1, 1, 1, headers.length).setFontWeight("bold").setBackground("#f3f4f6");
-      sheet.setFrozenRows(1);
-    }
+    createAttendanceSheet_(ss);
+    sheet = ss.getSheetByName(CONFIG.ATTENDANCE_SHEET) || ss.getSheetByName("ATTENDANCE");
   }
   return sheet;
 }
 
-// ---------------------------------------------------------------------------
-// AUTHENTICATION
-// ---------------------------------------------------------------------------
-function handleAdminAuth(params) {
-  var adminName = (params.adminName || "").trim();
-  var password = params.password || "";
-  
-  if (!adminName || !password) {
-    return { success: false, error: "Admin Name and Password are required." };
+function getScanLogSheet_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName(CONFIG.SCAN_LOG_SHEET) || ss.getSheetByName("SCAN LOGS");
+  if (!sheet) {
+    createScanLogSheet_(ss);
+    sheet = ss.getSheetByName(CONFIG.SCAN_LOG_SHEET) || ss.getSheetByName("SCAN LOGS");
   }
-
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName(SHEETS.ADMINS);
-  var data = sheet.getDataRange().getValues();
-
-  var hashedInput = hashPassword(password);
-
-  for (var i = 1; i < data.length; i++) {
-    var rowAdminName = String(data[i][1]).trim();
-    var rowHash = String(data[i][3]);
-    var rowRole = String(data[i][4]);
-    var rowStatus = String(data[i][5]);
-
-    if (rowAdminName.toLowerCase() === adminName.toLowerCase()) {
-      if (rowStatus !== "ACTIVE") {
-        return { success: false, error: "Admin account is deactivated." };
-      }
-      if (rowHash === hashedInput) {
-        return {
-          success: true,
-          user: {
-            id: String(data[i][0]),
-            name: rowAdminName,
-            email: String(data[i][2]),
-            role: rowRole
-          },
-          token: generateSessionToken(rowAdminName, rowRole)
-        };
-      }
-    }
-  }
-
-  return { success: false, error: "Invalid admin credentials." };
+  return sheet;
 }
 
-function handleCoordinatorAuth(params) {
-  var email = (params.email || "").trim().toLowerCase();
-  var password = params.password || "";
-
-  if (!email || !password) {
-    return { success: false, error: "Invalid email or password." };
+function getResetLogSheet_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName(CONFIG.RESET_LOG_SHEET) || ss.getSheetByName("QR RESET LOGS");
+  if (!sheet) {
+    createResetLogSheet_(ss);
+    sheet = ss.getSheetByName(CONFIG.RESET_LOG_SHEET) || ss.getSheetByName("QR RESET LOGS");
   }
-
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName(SHEETS.COORDINATORS);
-  var data = sheet.getDataRange().getValues();
-  var hashedInput = hashPassword(password);
-
-  for (var i = 1; i < data.length; i++) {
-    var rowEmail = String(data[i][2]).trim().toLowerCase();
-    var rowHash = String(data[i][3]);
-    var rowStatus = String(data[i][5]);
-
-    if (rowEmail === email) {
-      if (rowStatus !== "ACTIVE") {
-        return { success: false, error: "Coordinator account is inactive. Please contact Overall Admin." };
-      }
-      if (rowHash === hashedInput) {
-        // Update last login
-        sheet.getRange(i + 1, 8).setValue(new Date().toISOString());
-
-        return {
-          success: true,
-          user: {
-            id: String(data[i][0]),
-            name: String(data[i][1]),
-            email: rowEmail,
-            role: "EVENT_COORDINATOR",
-            assignedEvent: String(data[i][4])
-          },
-          token: generateSessionToken(email, "EVENT_COORDINATOR")
-        };
-      }
-    }
-  }
-
-  // Exact prompt requirement: "Invalid email or password." Do not reveal which was wrong.
-  return { success: false, error: "Invalid email or password." };
+  return sheet;
 }
 
-// ---------------------------------------------------------------------------
-// ATTENDANCE MARKING WITH CONCURRENCY PROTECTION & STRICT VALIDATION
-// ---------------------------------------------------------------------------
-function handleMarkAttendance(params) {
-  var participant = params.participant || {
-    uniqueId: params.uniqueId || params.unique_id,
-    name: params.name || params.participantName,
-    universityRegistrationNumber: params.universityRegNumber || params.registrationNo || params.universityRegistrationNumber,
-    email: params.email,
-    mobileNumber: params.mobile || params.mobileNumber,
-    collegeName: params.college || params.collegeName,
-    department: params.department,
-    fieldOfStudy: params.fieldOfStudy,
-    teamName: params.teamName,
-    leaderName: params.leaderName,
-    membersName: params.members || params.membersName,
-    registeredEvents: params.registeredEvents || params.selectedEvents
-  };
-  var coordinatorName = params.coordinatorName || params.coordinator || "Coordinator";
-  var coordinatorEvent = (params.coordinatorAssignedEvent || params.scannedEvent || params.event || "").trim();
+/* ============================================================
+   UTILITIES
+   ============================================================ */
 
-  if (!participant || (!participant.uniqueId && !participant.unique_id)) {
-    logScan("", "Unknown", coordinatorName, coordinatorEvent, coordinatorEvent, "INVALID_QR", "Malformed QR data payload.");
-    return { success: false, result: "INVALID_QR", message: "Invalid or incomplete QR data." };
-  }
-
-  var uniqueId = String(participant.uniqueId || participant.unique_id).trim();
-  participant.uniqueId = uniqueId;
-  participant.unique_id = uniqueId;
-  var participantName = String(participant.name || "").trim();
-  var registeredEvents = participant.registeredEvents || participant.selectedEvents || [];
-  if (typeof registeredEvents === "string") {
-    try {
-      registeredEvents = JSON.parse(registeredEvents);
-    } catch (e) {
-      registeredEvents = registeredEvents.split(/[,;\n\r|]+/).map(function(s) { return s.trim(); }).filter(Boolean);
-    }
-  }
-
-  // STEP 4 & 5: Check whether participant registered for the coordinator's assigned event
-  var normalizeEvent = function(s) {
-    return String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-  };
-
-  var isRegisteredForEvent = false;
-  var targetNorm = normalizeEvent(coordinatorEvent);
-  for (var k = 0; k < registeredEvents.length; k++) {
-    var evNorm = normalizeEvent(registeredEvents[k]);
-    if (evNorm === targetNorm || 
-        (targetNorm.indexOf("paper") !== -1 && evNorm.indexOf("paper") !== -1) ||
-        (targetNorm.indexOf("technical") !== -1 && evNorm.indexOf("technical") !== -1 && targetNorm.slice(-2) === evNorm.slice(-2))) {
-      isRegisteredForEvent = true;
-      break;
-    }
-  }
-
-  if (!isRegisteredForEvent) {
-    logScan(uniqueId, participantName, coordinatorName, coordinatorEvent, coordinatorEvent, "NOT_REGISTERED", "Participant not registered for " + coordinatorEvent);
-    return {
-      success: false,
-      result: "NOT_REGISTERED",
-      message: "Participant is not registered for your assigned event.",
-      participant: participant,
-      scannedEvent: coordinatorEvent,
-      coordinatorName: coordinatorName
-    };
-  }
-
-  // STEP 6: Concurrency protection using Google Apps Script LockService
-  var lock = LockService.getScriptLock();
-  try {
-    lock.waitLock(10000); // Wait up to 10 seconds for concurrent scans
-  } catch (e) {
-    return { success: false, result: "ERROR", message: "Server busy, please scan again." };
-  }
-
-  try {
-    var ss = SpreadsheetApp.getActiveSpreadsheet();
-    var attSheet = ss.getSheetByName(SHEETS.ATTENDANCE);
-    var data = attSheet.getDataRange().getValues();
-
-    // Check UNIQUE ID + EVENT
-    for (var i = 1; i < data.length; i++) {
-      var rowUniqueId = String(data[i][1]).trim();
-      var rowEvent = String(data[i][13]).trim();
-      var rowStatus = String(data[i][17]).trim();
-
-      if (rowUniqueId.toLowerCase() === uniqueId.toLowerCase() && 
-          (rowEvent.toLowerCase() === coordinatorEvent.toLowerCase() || normalizeEvent(rowEvent) === targetNorm) &&
-          rowStatus === "PRESENT") {
-        
-        var prevCoord = String(data[i][14]);
-        var prevTime = String(data[i][16]) || String(data[i][0]);
-
-        logScan(uniqueId, participantName, coordinatorName, coordinatorEvent, coordinatorEvent, "ALREADY_MARKED", "Duplicate scan detected.");
-
-        lock.releaseLock();
-        return {
-          success: false,
-          result: "ALREADY_MARKED",
-          message: "Attendance Already Marked for this Event.",
-          participant: participant,
-          scannedEvent: coordinatorEvent,
-          coordinatorName: coordinatorName,
-          previousScan: {
-            coordinatorName: prevCoord,
-            scanTime: prevTime,
-            scannedEvent: coordinatorEvent
-          }
-        };
-      }
-    }
-
-    // Save Attendance record
-    var now = new Date();
-    var timeStr = Utilities.formatDate(now, Session.getScriptTimeZone(), "hh:mm a");
-    var dateStr = Utilities.formatDate(now, Session.getScriptTimeZone(), "yyyy-MM-dd");
-
-    attSheet.appendRow([
-      now.toISOString(),
-      uniqueId,
-      participantName,
-      participant.universityRegistrationNumber || "",
-      participant.email || "",
-      participant.mobileNumber || "",
-      participant.collegeName || "",
-      participant.fieldOfStudy || "",
-      participant.department || "",
-      participant.teamName || "",
-      participant.leaderName || "",
-      participant.membersName || "",
-      JSON.stringify(registeredEvents),
-      coordinatorEvent,
-      coordinatorName,
-      dateStr,
-      timeStr,
-      "PRESENT"
-    ]);
-
-    logScan(uniqueId, participantName, coordinatorName, coordinatorEvent, coordinatorEvent, "SUCCESS", "Attendance marked successfully.");
-
-    // Check if ALL registered events are completed
-    var attendedEvents = [coordinatorEvent];
-    for (var j = 1; j < data.length; j++) {
-      if (String(data[j][1]).trim().toLowerCase() === uniqueId.toLowerCase() && String(data[j][17]) === "PRESENT") {
-        var ev = String(data[j][13]).trim();
-        if (attendedEvents.indexOf(ev) === -1) {
-          attendedEvents.push(ev);
-        }
-      }
-    }
-
-    var allCompleted = true;
-    for (var r = 0; r < registeredEvents.length; r++) {
-      var target = String(registeredEvents[r]).trim().toLowerCase();
-      var found = false;
-      for (var a = 0; a < attendedEvents.length; a++) {
-        if (attendedEvents[a].toLowerCase() === target) {
-          found = true;
-          break;
-        }
-      }
-      if (!found) {
-        allCompleted = false;
-        break;
-      }
-    }
-
-    lock.releaseLock();
-
-    return {
-      success: true,
-      result: "SUCCESS",
-      message: "ATTENDANCE MARKED",
-      participant: participant,
-      scannedEvent: coordinatorEvent,
-      coordinatorName: coordinatorName,
-      timestamp: now.toISOString(),
-      attendanceTime: timeStr,
-      allEventsCompleted: allCompleted,
-      attendedEvents: attendedEvents
-    };
-
-  } catch (err) {
-    lock.releaseLock();
-    logScan(uniqueId, participantName, coordinatorName, coordinatorEvent, coordinatorEvent, "ERROR", err.toString());
-    return { success: false, result: "ERROR", message: err.toString() };
-  }
+function clean_(value) {
+  return String(value || "").trim();
 }
 
-function logScan(uniqueId, participantName, coordinatorName, assignedEvent, scannedEvent, result, message) {
-  try {
-    var ss = SpreadsheetApp.getActiveSpreadsheet();
-    var sheet = ss.getSheetByName(SHEETS.SCAN_LOGS);
-    sheet.appendRow([
-      new Date().toISOString(),
-      uniqueId,
-      participantName,
-      coordinatorName,
-      assignedEvent,
-      scannedEvent,
-      result,
-      message
-    ]);
-  } catch (e) {
-    // Ignore logging error
-  }
+function normalizeUniqueId_(value) {
+  return String(value || "").trim().toUpperCase();
 }
 
-// ---------------------------------------------------------------------------
-// EVENTS MANAGEMENT
-// ---------------------------------------------------------------------------
-function handleGetEvents() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName(SHEETS.EVENTS);
-  var data = sheet.getDataRange().getValues();
-  var list = [];
-
-  for (var i = 1; i < data.length; i++) {
-    list.push({
-      eventId: String(data[i][0]),
-      eventName: String(data[i][1]),
-      category: String(data[i][2]),
-      status: String(data[i][3]),
-      createdAt: String(data[i][4]),
-      description: String(data[i][5])
-    });
-  }
-
-  return { success: true, events: list };
-}
-
-function handleCreateEvent(params) {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName(SHEETS.EVENTS);
-  var eventId = "EVT-" + ("000" + sheet.getLastRow()).slice(-3);
-  var now = new Date().toISOString();
-
-  sheet.appendRow([
-    eventId,
-    params.eventName,
-    params.category || "TECHNICAL",
-    "ACTIVE",
-    now,
-    params.description || ""
-  ]);
-
-  return { success: true, eventId: eventId };
-}
-
-function handleUpdateEvent(params) {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName(SHEETS.EVENTS);
-  var data = sheet.getDataRange().getValues();
-
-  for (var i = 1; i < data.length; i++) {
-    if (String(data[i][0]) === params.eventId) {
-      if (params.eventName) sheet.getRange(i + 1, 2).setValue(params.eventName);
-      if (params.category) sheet.getRange(i + 1, 3).setValue(params.category);
-      if (params.status) sheet.getRange(i + 1, 4).setValue(params.status);
-      if (params.description !== undefined) sheet.getRange(i + 1, 6).setValue(params.description);
-      return { success: true };
-    }
-  }
-
-  return { success: false, error: "Event not found" };
-}
-
-// ---------------------------------------------------------------------------
-// COORDINATORS MANAGEMENT
-// ---------------------------------------------------------------------------
-function handleGetCoordinators(params) {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName(SHEETS.COORDINATORS);
-  var data = sheet.getDataRange().getValues();
-  var list = [];
-  var eventFilter = params && params.event ? String(params.event).trim().toLowerCase() : null;
-
-  for (var i = 1; i < data.length; i++) {
-    var assignedEvent = String(data[i][4]);
-    if (eventFilter && assignedEvent.toLowerCase() !== eventFilter) {
-      continue;
-    }
-    list.push({
-      coordinatorId: String(data[i][0]),
-      coordinatorName: String(data[i][1]),
-      email: String(data[i][2]),
-      assignedEvent: assignedEvent,
-      status: String(data[i][5]),
-      createdAt: String(data[i][6]),
-      lastLogin: String(data[i][7] || "")
-    });
-  }
-
-  return { success: true, coordinators: list };
-}
-
-function handleAddCoordinator(params) {
-  var name = (params.coordinatorName || "").trim();
-  var email = (params.email || "").trim().toLowerCase();
-  var password = params.password || "";
-  var event = (params.assignedEvent || "").trim();
-
-  if (!name || !email || !password || !event) {
-    return { success: false, error: "All fields are required." };
-  }
-
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName(SHEETS.COORDINATORS);
-  var data = sheet.getDataRange().getValues();
-
-  // Check unique email
-  for (var i = 1; i < data.length; i++) {
-    if (String(data[i][2]).trim().toLowerCase() === email) {
-      return { success: false, error: "A coordinator with this email already exists." };
-    }
-  }
-
-  var coordId = "CRD-" + ("000" + sheet.getLastRow()).slice(-3);
-  sheet.appendRow([
-    coordId,
-    name,
-    email,
-    hashPassword(password),
-    event,
-    "ACTIVE",
-    new Date().toISOString(),
-    ""
-  ]);
-
-  return { success: true, coordinatorId: coordId };
-}
-
-function handleUpdateCoordinator(params) {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName(SHEETS.COORDINATORS);
-  var data = sheet.getDataRange().getValues();
-
-  for (var i = 1; i < data.length; i++) {
-    if (String(data[i][0]) === params.coordinatorId) {
-      if (params.coordinatorName) sheet.getRange(i + 1, 2).setValue(params.coordinatorName);
-      if (params.assignedEvent) sheet.getRange(i + 1, 5).setValue(params.assignedEvent);
-      if (params.status) sheet.getRange(i + 1, 6).setValue(params.status);
-      if (params.password) sheet.getRange(i + 1, 4).setValue(hashPassword(params.password));
-      return { success: true };
-    }
-  }
-
-  return { success: false, error: "Coordinator not found." };
-}
-
-function handleDeactivateCoordinator(params) {
-  return handleUpdateCoordinator({ coordinatorId: params.coordinatorId, status: "INACTIVE" });
-}
-
-function handleDeleteCoordinator(params) {
-  var email = (params.email || "").trim().toLowerCase();
-  var coordinatorId = (params.coordinatorId || "").trim();
-
-  if (!email && !coordinatorId) {
-    return { success: false, message: "Coordinator email is required." };
-  }
-
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName(SHEETS.COORDINATORS);
-  var data = sheet.getDataRange().getValues();
-  var rowIndex = -1;
-
-  for (var i = 1; i < data.length; i++) {
-    var rowCoordId = String(data[i][0]).trim();
-    var rowEmail = String(data[i][2]).trim().toLowerCase();
-    if ((email && rowEmail === email) || (coordinatorId && rowCoordId === coordinatorId)) {
-      rowIndex = i + 1; // 1-indexed row in sheet
-      break;
-    }
-  }
-
-  if (rowIndex === -1) {
-    return { success: false, message: "Coordinator not found." };
-  }
-
-  sheet.deleteRow(rowIndex);
-
-  return {
-    success: true,
-    message: "Coordinator deleted successfully."
-  };
-}
-
-// ---------------------------------------------------------------------------
-// JURY MANAGEMENT
-// ---------------------------------------------------------------------------
-function handleGetJury(params) {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName(SHEETS.JURY);
-  var data = sheet.getDataRange().getValues();
-  var list = [];
-  var eventFilter = params && params.event ? String(params.event).trim().toLowerCase() : null;
-
-  for (var i = 1; i < data.length; i++) {
-    var jEvent = String(data[i][2]);
-    if (eventFilter && jEvent.toLowerCase() !== eventFilter) {
-      continue;
-    }
-    list.push({
-      juryId: String(data[i][0]),
-      juryName: String(data[i][1]),
-      event: jEvent,
-      status: String(data[i][3]),
-      createdAt: String(data[i][4])
-    });
-  }
-
-  return { success: true, jury: list };
-}
-
-function handleAddJury(params) {
-  var name = (params.juryName || "").trim();
-  var event = (params.event || "").trim();
-
-  if (!name || !event) {
-    return { success: false, error: "Jury name and event are required." };
-  }
-
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName(SHEETS.JURY);
-  var juryId = "JRY-" + ("000" + sheet.getLastRow()).slice(-3);
-
-  sheet.appendRow([
-    juryId,
-    name,
-    event,
-    "ACTIVE",
-    new Date().toISOString()
-  ]);
-
-  return { success: true, juryId: juryId };
-}
-
-function handleUpdateJury(params) {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName(SHEETS.JURY);
-  var data = sheet.getDataRange().getValues();
-
-  for (var i = 1; i < data.length; i++) {
-    if (String(data[i][0]) === params.juryId) {
-      if (params.juryName) sheet.getRange(i + 1, 2).setValue(params.juryName);
-      if (params.event) sheet.getRange(i + 1, 3).setValue(params.event);
-      if (params.status) sheet.getRange(i + 1, 4).setValue(params.status);
-      return { success: true };
-    }
-  }
-
-  return { success: false, error: "Jury member not found." };
-}
-
-function handleDeactivateJury(params) {
-  return handleUpdateJury({ juryId: params.juryId, status: "INACTIVE" });
-}
-
-// ---------------------------------------------------------------------------
-// ATTENDANCE QUERIES & RESET
-// ---------------------------------------------------------------------------
-function handleGetAttendance(params) {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName(SHEETS.ATTENDANCE);
-  var data = sheet.getDataRange().getValues();
-  var list = [];
-  var eventFilter = params && params.event ? String(params.event).trim().toLowerCase() : null;
-
-  for (var i = 1; i < data.length; i++) {
-    var rowEvent = String(data[i][13]);
-    if (eventFilter && rowEvent.toLowerCase() !== eventFilter) {
-      continue;
-    }
-
-    var registered = [];
-    try {
-      registered = JSON.parse(data[i][12]);
-    } catch (e) {
-      registered = [String(data[i][12])];
-    }
-
-    list.push({
-      timestamp: String(data[i][0]),
-      uniqueId: String(data[i][1]),
-      participantName: String(data[i][2]),
-      universityRegNumber: String(data[i][3]),
-      email: String(data[i][4]),
-      mobileNumber: String(data[i][5]),
-      collegeName: String(data[i][6]),
-      fieldOfStudy: String(data[i][7]),
-      department: String(data[i][8]),
-      teamName: String(data[i][9]),
-      leaderName: String(data[i][10]),
-      membersName: String(data[i][11]),
-      registeredEvents: registered,
-      scannedEvent: rowEvent,
-      coordinatorName: String(data[i][14]),
-      attendanceDate: String(data[i][15]),
-      attendanceTime: String(data[i][16]),
-      attendanceStatus: String(data[i][17])
-    });
-  }
-
-  return { success: true, attendance: list };
-}
-
-function handleGetParticipantAttendance(params) {
-  var uniqueId = (params.uniqueId || "").trim().toLowerCase();
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName(SHEETS.ATTENDANCE);
-  var data = sheet.getDataRange().getValues();
-  var attended = [];
-
-  for (var i = 1; i < data.length; i++) {
-    if (String(data[i][1]).trim().toLowerCase() === uniqueId && String(data[i][17]) === "PRESENT") {
-      attended.push({
-        event: String(data[i][13]),
-        time: String(data[i][16]),
-        coordinator: String(data[i][14])
-      });
-    }
-  }
-
-  return { success: true, uniqueId: uniqueId, attendedEvents: attended };
-}
-
-function handleResetAttendance(params) {
-  var uniqueId = (params.uniqueId || params.unique_id || "").trim();
-  var event = (params.event || params.scannedEvent || "").trim();
-  var adminName = (params.adminName || params.actorName || params.coordinatorName || "Overall Admin").trim();
-  var reason = (params.reason || "Overall Admin Attendance Record Removal").trim();
-
-  if (!uniqueId) {
-    return { success: false, error: "Unique ID is mandatory for QR reset." };
-  }
-
-  var normalizeEvent = function(s) {
-    return String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-  };
-  var targetNorm = event ? normalizeEvent(event) : "";
-
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var attSheet = ss.getSheetByName(SHEETS.ATTENDANCE);
-  var data = attSheet.getDataRange().getValues();
-  var found = false;
-
-  for (var i = data.length - 1; i >= 1; i--) {
-    var rowUniqueId = String(data[i][1]).trim();
-    var rowEvent = String(data[i][13]).trim();
-    var rowEventNorm = normalizeEvent(rowEvent);
-
-    var eventMatches = !targetNorm || rowEvent.toLowerCase() === event.toLowerCase() || rowEventNorm === targetNorm;
-
-    if (rowUniqueId.toLowerCase() === uniqueId.toLowerCase() && eventMatches) {
-      var prevStatus = String(data[i][17]);
-      attSheet.deleteRow(i + 1);
-      found = true;
-
-      // Log to QR RESET LOGS
-      var resetSheet = ss.getSheetByName(SHEETS.QR_RESET_LOGS);
-      resetSheet.appendRow([
-        new Date().toISOString(),
-        uniqueId,
-        adminName,
-        reason,
-        prevStatus,
-        "RESET / REMOVED",
-        rowEvent || event
-      ]);
-      break;
-    }
-  }
-
-  if (!found) {
-    return { success: false, error: "No attendance record found for " + uniqueId + (event ? (" in " + event) : "") };
-  }
-
-  return { success: true, message: "Attendance state reset successfully for " + uniqueId + (event ? (" in " + event) : "") };
-}
-
-// ---------------------------------------------------------------------------
-// DASHBOARD & AUDIT STATS
-// ---------------------------------------------------------------------------
-function handleGetSystemStats() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  
-  // Events
-  var eventsSheet = ss.getSheetByName(SHEETS.EVENTS);
-  var eventsData = eventsSheet.getDataRange().getValues();
-  var totalEvents = Math.max(0, eventsData.length - 1);
-  var eventNames = [];
-  for (var e = 1; e < eventsData.length; e++) {
-    eventNames.push(String(eventsData[e][1]));
-  }
-
-  // Attendance
-  var attSheet = ss.getSheetByName(SHEETS.ATTENDANCE);
-  var attData = attSheet.getDataRange().getValues();
-  var totalAttendance = Math.max(0, attData.length - 1);
-  var uniqueParticipantsMap = {};
-  var eventCountMap = {};
-
-  for (var n = 0; n < eventNames.length; n++) {
-    eventCountMap[eventNames[n]] = 0;
-  }
-
-  var recentScans = [];
-  for (var i = attData.length - 1; i >= 1; i--) {
-    var uId = String(attData[i][1]);
-    uniqueParticipantsMap[uId] = true;
-
-    var ev = String(attData[i][13]);
-    eventCountMap[ev] = (eventCountMap[ev] || 0) + 1;
-
-    if (recentScans.length < 6) {
-      recentScans.push({
-        uniqueId: uId,
-        participantName: String(attData[i][2]),
-        scannedEvent: ev,
-        coordinatorName: String(attData[i][14]),
-        attendanceTime: String(attData[i][16]) || String(attData[i][0]),
-        result: "SUCCESS"
-      });
-    }
-  }
-
-  // Active Coordinators
-  var coordSheet = ss.getSheetByName(SHEETS.COORDINATORS);
-  var coordData = coordSheet.getDataRange().getValues();
-  var activeCoordinators = 0;
-  for (var c = 1; c < coordData.length; c++) {
-    if (String(coordData[c][5]) === "ACTIVE") activeCoordinators++;
-  }
-
-  var eventWise = [];
-  for (var key in eventCountMap) {
-    eventWise.push({ eventName: key, count: eventCountMap[key] });
-  }
-
-  return {
-    success: true,
-    stats: {
-      totalParticipants: Object.keys(uniqueParticipantsMap).length,
-      totalAttendance: totalAttendance,
-      activeCoordinators: activeCoordinators,
-      totalEvents: totalEvents,
-      eventWiseAttendance: eventWise,
-      recentScans: recentScans
-    }
-  };
-}
-
-function handleGetCoordinatorStats(params) {
-  var event = (params.assignedEvent || "").trim().toLowerCase();
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-
-  // Attendance for event
-  var attSheet = ss.getSheetByName(SHEETS.ATTENDANCE);
-  var attData = attSheet.getDataRange().getValues();
-  var todayAttendance = 0;
-  var totalScans = 0;
-  var recent = [];
-
-  for (var i = attData.length - 1; i >= 1; i--) {
-    var rowEvent = String(attData[i][13]).trim().toLowerCase();
-    if (rowEvent === event) {
-      totalScans++;
-      todayAttendance++;
-      if (recent.length < 5) {
-        recent.push({
-          uniqueId: String(attData[i][1]),
-          time: String(attData[i][16]),
-          result: "SUCCESS"
-        });
-      }
-    }
-  }
-
-  // Count already marked from logs
-  var logsSheet = ss.getSheetByName(SHEETS.SCAN_LOGS);
-  var logsData = logsSheet.getDataRange().getValues();
-  var alreadyMarkedAttempts = 0;
-
-  for (var l = 1; l < logsData.length; l++) {
-    var lEvent = String(logsData[l][5]).trim().toLowerCase();
-    var lResult = String(logsData[l][6]);
-    if (lEvent === event && lResult === "ALREADY_MARKED") {
-      alreadyMarkedAttempts++;
-    }
-  }
-
-  return {
-    success: true,
-    stats: {
-      todayAttendance: todayAttendance,
-      totalScans: totalScans,
-      alreadyMarkedAttempts: alreadyMarkedAttempts,
-      recentScans: recent
-    }
-  };
-}
-
-function handleGetScanLogs(params) {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName(SHEETS.SCAN_LOGS);
-  var data = sheet.getDataRange().getValues();
-  var list = [];
-  var limit = (params && params.limit) || 100;
-
-  for (var i = data.length - 1; i >= 1 && list.length < limit; i--) {
-    list.push({
-      timestamp: String(data[i][0]),
-      uniqueId: String(data[i][1]),
-      participantName: String(data[i][2]),
-      coordinatorName: String(data[i][3]),
-      coordinatorAssignedEvent: String(data[i][4]),
-      scannedEvent: String(data[i][5]),
-      result: String(data[i][6]),
-      message: String(data[i][7])
-    });
-  }
-
-  return { success: true, logs: list };
-}
-
-// ---------------------------------------------------------------------------
-// UTILITIES: PASSWORD HASHING & TOKENS
-// ---------------------------------------------------------------------------
-function hashPassword(password) {
-  var rawHash = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, password + "SYNTRONIX_AEGIS_2026_SALT");
-  var hex = "";
-  for (var i = 0; i < rawHash.length; i++) {
-    var b = (rawHash[i] + 256) % 256;
-    var str = b.toString(16);
-    if (str.length === 1) str = "0" + str;
-    hex += str;
-  }
-  return hex;
-}
-
-function generateSessionToken(username, role) {
-  var payload = username + "|" + role + "|" + new Date().getTime();
-  return Utilities.base64Encode(payload);
+function jsonResponse_(data) {
+  return ContentService.createTextOutput(JSON.stringify(data))
+    .setMimeType(ContentService.MimeType.JSON);
 }

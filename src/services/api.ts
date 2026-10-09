@@ -1148,6 +1148,12 @@ export async function markAttendance(
 }
 
 export async function deleteAttendanceRecord(uniqueId: string, event?: string): Promise<boolean> {
+  const session = getStoredSession();
+  const isAdmin = session?.user?.role === 'OVERALL_ADMIN';
+  if (!isAdmin) {
+    throw new Error('Unauthorized: Only Overall Admin can delete attendance records.');
+  }
+
   // 1. Remove from local storage immediately
   try {
     const list = getLocalAttendance().filter((a) => {
@@ -1165,26 +1171,46 @@ export async function deleteAttendanceRecord(uniqueId: string, event?: string): 
     await fetchApiJson(`${API_BASE}/attendance/delete`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ uniqueId, event }),
+      body: JSON.stringify({ uniqueId, event, actorName: session?.user?.name || 'Overall Admin' }),
     });
   } catch {}
 
   // 3. Direct call to Attendance Database API Web App
+  let directError = '';
   try {
-    await fetch(ATTENDANCE_API_URL, {
+    const directRes = await fetch(ATTENDANCE_API_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
       body: JSON.stringify({
+        apiKey: 'SYN26_ADMIN_7xK92pLm4Q8vZ3',
         action: 'deleteAttendance',
-        uniqueId,
+        uniqueId: uniqueId,
         unique_id: uniqueId,
-        event,
-        scannedEvent: event,
+        eventName: event || '',
+        event: event || '',
+        scannedEvent: event || '',
+        adminName: session?.user?.name || 'Overall Admin',
       }),
       redirect: 'follow',
     });
-  } catch (e) {
+
+    const text = await directRes.text();
+    let json: any = null;
+    try { json = JSON.parse(text); } catch {}
+
+    if (json && (json.success === true || json.code === 'ATTENDANCE_DELETED')) {
+      return true;
+    }
+    if (json && json.success === false) {
+      directError = json.error || json.message || 'Database record deletion failed.';
+    }
+  } catch (e: any) {
+    directError = e.message || 'Network communication error calling Attendance API.';
     console.warn('Direct Attendance Database API delete call notice:', e);
+  }
+
+  if (directError) {
+    throw new Error(directError);
   }
 
   return true;
@@ -1284,11 +1310,52 @@ export async function deleteParticipant(id: string): Promise<boolean> {
 
 export async function getAttendance(event?: string): Promise<AttendanceRecord[]> {
   const local = getLocalAttendance();
-  const url = event ? `${API_BASE}/attendance?event=${encodeURIComponent(event)}` : `${API_BASE}/attendance`;
-  const { ok, data } = await fetchApiJson(url);
   let serverList: AttendanceRecord[] = [];
-  if (ok && data && Array.isArray(data.attendance)) {
-    serverList = data.attendance;
+
+  try {
+    const url = event ? `${API_BASE}/attendance?event=${encodeURIComponent(event)}` : `${API_BASE}/attendance`;
+    const { ok, data } = await fetchApiJson(url);
+    if (ok && data && Array.isArray(data.attendance) && data.attendance.length > 0) {
+      serverList = data.attendance;
+    }
+  } catch {}
+
+  // Direct fetch from Attendance Database API Web App (for static Vercel deployments)
+  if (serverList.length === 0) {
+    try {
+      const directUrl = `${ATTENDANCE_API_URL}?action=attendance${event ? `&event=${encodeURIComponent(event)}` : ''}`;
+      const res = await fetch(directUrl, { redirect: 'follow' });
+      if (res.ok) {
+        const text = await res.text();
+        let json: any = null;
+        try { json = JSON.parse(text); } catch {}
+        if (json && (Array.isArray(json.records) || Array.isArray(json.attendance))) {
+          const rawRecords = json.records || json.attendance;
+          serverList = rawRecords.map((r: any) => ({
+            timestamp: r.timestamp || new Date().toISOString(),
+            uniqueId: String(r.uniqueId || r.unique_id || '').trim(),
+            participantName: r.participantName || r.name || 'Participant',
+            universityRegNumber: String(r.universityRegNumber || r.registrationNo || r.regNo || '').trim(),
+            email: r.email || '',
+            mobileNumber: r.mobileNumber || r.mobile || '',
+            collegeName: r.collegeName || r.college || '',
+            fieldOfStudy: r.fieldOfStudy || '',
+            department: r.department || '',
+            teamName: r.teamName || '',
+            leaderName: r.leaderName || '',
+            membersName: r.membersName || r.members || '',
+            registeredEvents: Array.isArray(r.registeredEvents) ? r.registeredEvents : [r.event || r.scannedEvent || 'Paper Presentation'],
+            scannedEvent: r.event || r.scannedEvent || r.eventName || 'Paper Presentation',
+            coordinatorName: r.coordinator || r.coordinatorName || 'Coordinator',
+            attendanceDate: r.date || r.attendanceDate || new Date().toISOString().split('T')[0],
+            attendanceTime: r.time || r.attendanceTime || new Date().toLocaleTimeString(),
+            attendanceStatus: r.status || r.attendanceStatus || 'PRESENT',
+          }));
+        }
+      }
+    } catch (e) {
+      console.warn('Direct Attendance Database API getAttendance call notice:', e);
+    }
   }
 
   const map = new Map<string, AttendanceRecord>();
