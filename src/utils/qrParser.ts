@@ -148,6 +148,14 @@ export function isParticipantRegisteredForEvent(
     // 2. Common typo resilience (e.g. "Paper Presentaion" vs "Paper Presentation")
     if (
       (evClean.startsWith('paperpresent') && targetClean.startsWith('paperpresent')) ||
+      (evClean.startsWith('promptfest') && targetClean.startsWith('promptfest')) ||
+      (evClean.startsWith('vibevista') && targetClean.startsWith('vibevista')) ||
+      (evClean.startsWith('frenzy') && targetClean.startsWith('frenzy')) ||
+      (evClean.startsWith('memoryhunt') && targetClean.startsWith('memoryhunt')) ||
+      (evClean.startsWith('imposter') && targetClean.startsWith('imposter')) ||
+      (evClean.startsWith('theimposter') && targetClean.startsWith('theimposter')) ||
+      (evClean.startsWith('onlinearticle') && targetClean.startsWith('onlinearticle')) ||
+      (evClean.startsWith('articlepresent') && targetClean.startsWith('articlepresent')) ||
       (evClean.startsWith('postermak') && targetClean.startsWith('postermak')) ||
       (evClean.startsWith('codedebug') && targetClean.startsWith('codedebug')) ||
       (evClean.startsWith('webdesign') && targetClean.startsWith('webdesign')) ||
@@ -310,7 +318,7 @@ export function generateSampleParticipantQR(scenario: 'paper_and_nontech' | 'pos
           teamName: 'CyberKnights',
           leaderName: 'Arun Kumar',
           membersName: 'Kavitha S, Rahul M',
-          registeredEvents: ['Paper Presentation', 'Non-Technical Event 1'],
+          registeredEvents: ['Paper Presentation', 'VIBE VISTA'],
         },
         null,
         2
@@ -330,7 +338,7 @@ export function generateSampleParticipantQR(scenario: 'paper_and_nontech' | 'pos
           teamName: 'TechVision',
           leaderName: 'Pooja Varshini',
           membersName: 'Archana R',
-          registeredEvents: ['Poster Making'],
+          registeredEvents: ['Prompt Fest'],
         },
         null,
         2
@@ -350,7 +358,7 @@ export function generateSampleParticipantQR(scenario: 'paper_and_nontech' | 'pos
           teamName: 'CodeBusters',
           leaderName: 'Dinesh Karthik',
           membersName: 'Surya P',
-          registeredEvents: ['Poster Making', 'Non-Technical Event 2'],
+          registeredEvents: ['Prompt Fest', 'FRENZY 2K26'],
         },
         null,
         2
@@ -370,7 +378,7 @@ export function generateSampleParticipantQR(scenario: 'paper_and_nontech' | 'pos
           teamName: 'Quantum Coders',
           leaderName: 'Naveen Raj',
           membersName: 'Vignesh K, Madhan S',
-          registeredEvents: ['Paper Presentation', 'Poster Making'],
+          registeredEvents: ['Paper Presentation', 'Prompt Fest', 'VIBE VISTA'],
         },
         null,
         2

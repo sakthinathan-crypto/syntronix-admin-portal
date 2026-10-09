@@ -610,7 +610,7 @@ export const QRScannerModal: React.FC<QRScannerModalProps> = ({
                     <span className="font-mono text-[10px] text-[#F27D26]">SYN26-0028</span>
                   </div>
                   <div className="text-[11px] text-white/40 mt-1">
-                    Events: Poster Making
+                    Events: Prompt Fest
                   </div>
                 </button>
 
@@ -624,7 +624,7 @@ export const QRScannerModal: React.FC<QRScannerModalProps> = ({
                     <span className="font-mono text-[10px] text-red-400">SYN26-0035</span>
                   </div>
                   <div className="text-[11px] text-white/40 mt-1">
-                    Events: Poster + Non-Tech 2
+                    Events: Prompt Fest + FRENZY 2K26
                   </div>
                 </button>
 

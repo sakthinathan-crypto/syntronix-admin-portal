@@ -24,6 +24,10 @@ import {
   Edit3,
   X,
   Loader2,
+  Calendar,
+  MapPin,
+  Globe,
+  Sparkles,
 } from 'lucide-react';
 import {
   AdminStats,
@@ -92,6 +96,7 @@ export const OverallAdminDashboard: React.FC<OverallAdminDashboardProps> = ({
   // Attendance search & filter
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedFilterEvent, setSelectedFilterEvent] = useState('ALL');
+  const [eventCategoryFilter, setEventCategoryFilter] = useState<'ALL' | 'TECHNICAL' | 'NON_TECHNICAL' | 'ONLINE'>('ALL');
 
   // Attendance Delete States
   const [attendanceToDelete, setAttendanceToDelete] = useState<AttendanceRecord | null>(null);
@@ -491,6 +496,7 @@ export const OverallAdminDashboard: React.FC<OverallAdminDashboardProps> = ({
           {(() => {
             const techEventsCount = events.filter((e) => e.category === 'TECHNICAL').length;
             const nonTechEventsCount = events.filter((e) => e.category === 'NON_TECHNICAL').length;
+            const onlineEventsCount = events.filter((e) => e.category === 'ONLINE' || (e.category && e.category.toLowerCase().includes('online'))).length;
             const visibleCoordinators = coordinators.filter((c) => !isCoordinatorDeletedClient(c));
             const activeCoordsCount = visibleCoordinators.filter(
               (c) => (c.status || 'ACTIVE').toUpperCase() === 'ACTIVE'
@@ -564,7 +570,7 @@ export const OverallAdminDashboard: React.FC<OverallAdminDashboardProps> = ({
                     {stats?.totalEvents ?? events.length}
                   </div>
                   <p className="text-[11px] text-white/40 font-mono mt-1">
-                    {techEventsCount} Technical + {nonTechEventsCount} Non-Technical
+                    {techEventsCount} Technical • {nonTechEventsCount} Non-Technical • {onlineEventsCount} Online
                   </p>
                 </div>
               </div>
@@ -696,62 +702,223 @@ export const OverallAdminDashboard: React.FC<OverallAdminDashboardProps> = ({
       {/* ============================================================ */}
       {activeTab === 'events' && (
         <div className="space-y-6">
-          <div className="flex items-center justify-between">
+          {/* Header Title */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div>
               <h3 className="text-lg font-bold text-white font-['Space_Grotesk']">
                 Symposium Events Directory
               </h3>
               <p className="text-xs text-white/40 font-mono">
-                Click any event card to open its dedicated management console (Coordinators, Jury, Attendance, Stats).
+                Click any event card to view full guidelines, round breakdowns, rules, and dedicated management controls.
               </p>
+            </div>
+
+            {/* Category Filter Pills */}
+            <div className="flex items-center gap-1.5 p-1 rounded-xl bg-[#0A0A0A] border border-white/10 overflow-x-auto">
+              {(
+                [
+                  { id: 'ALL', label: 'All Events', count: events.length },
+                  {
+                    id: 'TECHNICAL',
+                    label: 'Technical',
+                    count: events.filter((e) => e.category === 'TECHNICAL').length,
+                  },
+                  {
+                    id: 'NON_TECHNICAL',
+                    label: 'Non-Technical',
+                    count: events.filter((e) => e.category === 'NON_TECHNICAL').length,
+                  },
+                  {
+                    id: 'ONLINE',
+                    label: 'Online',
+                    count: events.filter(
+                      (e) =>
+                        e.category === 'ONLINE' ||
+                        (e.category && e.category.toLowerCase().includes('online'))
+                    ).length,
+                  },
+                ] as const
+              ).map((cat) => (
+                <button
+                  key={cat.id}
+                  onClick={() => setEventCategoryFilter(cat.id)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-mono font-semibold whitespace-nowrap transition-colors flex items-center gap-1.5 ${
+                    eventCategoryFilter === cat.id
+                      ? 'bg-[#F27D26] text-[#070707] font-bold shadow-md shadow-[#F27D26]/20'
+                      : 'text-white/50 hover:text-white hover:bg-white/5'
+                  }`}
+                >
+                  <span>{cat.label}</span>
+                  <span
+                    className={`text-[10px] px-1.5 py-0.2 rounded-full ${
+                      eventCategoryFilter === cat.id
+                        ? 'bg-black/20 text-[#070707]'
+                        : 'bg-white/10 text-white/60'
+                    }`}
+                  >
+                    {cat.count}
+                  </span>
+                </button>
+              ))}
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-            {events.map((ev) => {
-              const eventCoords = coordinators.filter((c) => c.assignedEvent === ev.eventName);
-              const eventAttCount = attendance.filter((a) => a.scannedEvent === ev.eventName).length;
-
-              return (
-                <div
-                  key={ev.eventId}
-                  onClick={() => setSelectedEvent(ev)}
-                  className="group cursor-pointer p-6 rounded-2xl bg-[#0A0A0A] border border-white/10 hover:border-[#F27D26]/40 shadow-2xl transition-all duration-200 hover:-translate-y-1 relative flex flex-col justify-between"
-                >
-                  <div>
-                    <div className="flex items-center justify-between mb-3">
-                      <span className="text-[10px] font-mono uppercase px-2 py-0.5 rounded bg-white/5 text-[#F27D26] border border-white/10">
-                        {ev.category}
-                      </span>
-                      <span className="text-xs font-mono text-white/40">{ev.eventId}</span>
-                    </div>
-
-                    <h4 className="text-lg font-bold text-white font-['Space_Grotesk'] group-hover:text-[#F27D26] transition-colors">
-                      {ev.eventName}
-                    </h4>
-                    <p className="text-xs text-white/50 line-clamp-2 mt-1.5 leading-relaxed">
-                      {ev.description || 'No description provided.'}
-                    </p>
-                  </div>
-
-                  <div className="pt-5 mt-5 border-t border-white/5 flex items-center justify-between text-xs font-mono">
-                    <div className="flex items-center gap-3">
-                      <span className="text-white/40">
-                        Coordinators: <strong className="text-white">{eventCoords.length}</strong>
-                      </span>
-                      <span className="text-white/40">
-                        Present: <strong className="text-[#F27D26]">{eventAttCount}</strong>
-                      </span>
-                    </div>
-
-                    <span className="text-[#F27D26] font-semibold flex items-center gap-1 group-hover:translate-x-1 transition-transform">
-                      <span>Manage</span>
-                      <ChevronRight className="w-3.5 h-3.5" />
-                    </span>
-                  </div>
+          {/* Official Symposium Schedule Banner */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-5 rounded-2xl bg-gradient-to-br from-[#0F0D0B] to-[#0A0A0A] border border-[#F27D26]/20 shadow-2xl">
+            {/* Day 1 */}
+            <div className="flex items-start gap-3.5 p-4 rounded-xl bg-white/5 border border-white/5">
+              <div className="w-10 h-10 rounded-xl bg-[#F27D26]/15 border border-[#F27D26]/30 flex items-center justify-center text-[#F27D26] shrink-0">
+                <Calendar className="w-5 h-5" />
+              </div>
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-mono font-bold text-[#F27D26] uppercase">
+                    Day 1 • Offline / In Person
+                  </span>
+                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                    On Campus
+                  </span>
                 </div>
-              );
-            })}
+                <h4 className="text-base font-bold text-white font-['Space_Grotesk']">
+                  10 October 2026
+                </h4>
+                <p className="text-xs text-white/60 flex items-center gap-1.5 font-mono">
+                  <MapPin className="w-3.5 h-3.5 text-[#F27D26] shrink-0" />
+                  <span>Venue: E.G.S. Pillay Engineering College, Nagapattinam</span>
+                </p>
+                <div className="text-[11px] text-white/40 font-mono pt-1">
+                  Technical Events (Paper Presentation, Prompt Fest) + 4 Non-Technical Events
+                </div>
+              </div>
+            </div>
+
+            {/* Day 2 */}
+            <div className="flex items-start gap-3.5 p-4 rounded-xl bg-white/5 border border-white/5">
+              <div className="w-10 h-10 rounded-xl bg-sky-500/15 border border-sky-500/30 flex items-center justify-center text-sky-400 shrink-0">
+                <Globe className="w-5 h-5" />
+              </div>
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-mono font-bold text-sky-400 uppercase">
+                    Day 2 • Fully Online
+                  </span>
+                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-sky-500/10 text-sky-300 border border-sky-500/20">
+                    Virtual Stage
+                  </span>
+                </div>
+                <h4 className="text-base font-bold text-white font-['Space_Grotesk']">
+                  14 October 2026
+                </h4>
+                <p className="text-xs text-white/60 flex items-center gap-1.5 font-mono">
+                  <Sparkles className="w-3.5 h-3.5 text-sky-400 shrink-0" />
+                  <span>Event: Online Article Presentation via Unstop</span>
+                </p>
+                <div className="text-[11px] text-white/40 font-mono pt-1">
+                  Virtual presentation and evaluation hosted nationwide via the Unstop platform
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Events Grid */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+            {events
+              .filter((ev) => {
+                if (eventCategoryFilter === 'ALL') return true;
+                if (eventCategoryFilter === 'TECHNICAL') return ev.category === 'TECHNICAL';
+                if (eventCategoryFilter === 'NON_TECHNICAL') return ev.category === 'NON_TECHNICAL';
+                if (eventCategoryFilter === 'ONLINE')
+                  return (
+                    ev.category === 'ONLINE' ||
+                    (ev.category && ev.category.toLowerCase().includes('online'))
+                  );
+                return true;
+              })
+              .map((ev) => {
+                const eventCoords = coordinators.filter((c) => c.assignedEvent === ev.eventName);
+                const eventAttCount = attendance.filter((a) => a.scannedEvent === ev.eventName).length;
+
+                return (
+                  <div
+                    key={ev.eventId}
+                    onClick={() => setSelectedEvent(ev)}
+                    className="group cursor-pointer p-6 rounded-2xl bg-[#0A0A0A] border border-white/10 hover:border-[#F27D26]/40 shadow-2xl transition-all duration-200 hover:-translate-y-1 relative flex flex-col justify-between"
+                  >
+                    <div>
+                      {/* Top Badges */}
+                      <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
+                        <div className="flex items-center gap-1.5">
+                          <span
+                            className={`text-[10px] font-mono uppercase px-2 py-0.5 rounded border ${
+                              ev.category === 'TECHNICAL'
+                                ? 'bg-[#F27D26]/10 text-[#F27D26] border-[#F27D26]/20'
+                                : ev.category === 'ONLINE'
+                                ? 'bg-sky-500/10 text-sky-400 border-sky-500/20'
+                                : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                            }`}
+                          >
+                            {ev.category}
+                          </span>
+                          <span className="text-xs font-mono text-white/40">{ev.eventId}</span>
+                        </div>
+
+                        <span className="text-[10px] font-mono text-white/50 px-2 py-0.5 rounded bg-white/5 border border-white/10">
+                          {ev.mode ||
+                            (ev.category === 'ONLINE'
+                              ? '14 Oct • Online'
+                              : '10 Oct • Offline')}
+                        </span>
+                      </div>
+
+                      {/* Event Title */}
+                      <h4 className="text-lg font-bold text-white font-['Space_Grotesk'] group-hover:text-[#F27D26] transition-colors">
+                        {ev.eventName}
+                      </h4>
+
+                      {/* Event Description */}
+                      <p className="text-xs text-white/50 line-clamp-2 mt-2 leading-relaxed">
+                        {ev.description || 'No description provided.'}
+                      </p>
+
+                      {/* Event Quick Specs Chips */}
+                      <div className="flex flex-wrap gap-1.5 mt-3 pt-3 border-t border-white/5">
+                        {ev.participationType && (
+                          <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-white/5 text-white/60 border border-white/5">
+                            👥 {ev.participationType}
+                          </span>
+                        )}
+                        {(ev.roundsCount !== undefined || (ev.rounds && ev.rounds.length > 0)) && (
+                          <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-white/5 text-white/60 border border-white/5">
+                            🎯 {ev.roundsCount !== undefined ? `${ev.roundsCount} Rounds` : `${ev.rounds?.length} Rounds`}
+                          </span>
+                        )}
+                        {ev.duration && (
+                          <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-white/5 text-white/60 border border-white/5">
+                            ⏱️ {ev.duration}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Bottom Metadata & CTA */}
+                    <div className="pt-4 mt-4 border-t border-white/5 flex items-center justify-between text-xs font-mono">
+                      <div className="flex items-center gap-3">
+                        <span className="text-white/40">
+                          Coordinators: <strong className="text-white">{eventCoords.length}</strong>
+                        </span>
+                        <span className="text-white/40">
+                          Present: <strong className="text-[#F27D26]">{eventAttCount}</strong>
+                        </span>
+                      </div>
+
+                      <span className="text-[#F27D26] font-semibold flex items-center gap-1 group-hover:translate-x-1 transition-transform">
+                        <span>Details</span>
+                        <ChevronRight className="w-3.5 h-3.5" />
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
           </div>
         </div>
       )}

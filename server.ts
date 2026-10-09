@@ -61,14 +61,32 @@ interface CoordinatorRow {
   lastLogin?: string;
 }
 
+interface EventRoundDetail {
+  roundNumber: number | string;
+  title: string;
+  duration?: string;
+  description: string;
+}
+
 interface EventRow {
   eventId: string;
   eventName: string;
-  category: 'TECHNICAL' | 'NON_TECHNICAL';
+  category: 'TECHNICAL' | 'NON_TECHNICAL' | 'ONLINE' | string;
   isPlaceholder?: boolean;
   status: 'ACTIVE' | 'PAUSED' | 'COMPLETED';
   createdAt: string;
   description?: string;
+  eventDate?: string;
+  mode?: string;
+  venue?: string;
+  participationType?: string;
+  teamSize?: string;
+  roundsCount?: number | string;
+  duration?: string;
+  rounds?: EventRoundDetail[];
+  rules?: string[];
+  winningCriteria?: string | string[];
+  requirements?: string[];
 }
 
 interface JuryRow {
@@ -171,52 +189,226 @@ const initialAdmins: AdminRow[] = [
   },
 ];
 
-// Initial Events
+// Initial Events (2 Technical, 4 Non-Technical, 1 Online)
 const initialEvents: EventRow[] = [
   {
     eventId: 'EVT-001',
     eventName: 'Paper Presentation',
     category: 'TECHNICAL',
+    eventDate: 'Day 1: 10 October 2026',
+    mode: 'Offline / In Person',
+    venue: 'E.G.S. Pillay Engineering College, Nagapattinam',
+    description: 'Technical Paper Presentation on emerging engineering disciplines, computing breakthroughs, and artificial intelligence.',
+    participationType: 'Team of 2 or Individual',
+    teamSize: '1–3 Members',
+    roundsCount: 2,
+    duration: '8–10 mins presentation + 2 mins Q&A',
+    rounds: [
+      { roundNumber: 1, title: 'Abstract & Paper Screening', duration: 'Pre-event', description: 'Evaluation of technical papers adhering to IEEE format across innovation, depth, and relevance.' },
+      { roundNumber: 2, title: 'Oral Presentation & Q&A Defense', duration: '10–12 minutes', description: 'Live stage presentation before jury panel followed by rigorous Q&A viva defense.' },
+    ],
+    rules: [
+      'Paper submissions must adhere to standard IEEE 2-column format (max 6 pages).',
+      'Presentation time limit is strictly 10 minutes followed by 2 minutes jury evaluation.',
+      'All registered authors presenting must carry college ID card.',
+    ],
+    winningCriteria: 'Originality of topic, technical depth, clarity of presentation, and quality of answers during jury defense.',
+    requirements: ['Presentation slides (.pptx/.pdf) on USB drive', 'Two printed copies of paper abstract', 'College ID card'],
     status: 'ACTIVE',
     createdAt: new Date().toISOString(),
-    description: 'Technical Paper Presentation on emerging engineering disciplines',
   },
   {
     eventId: 'EVT-002',
-    eventName: 'Poster Making',
+    eventName: 'Prompt Fest',
     category: 'TECHNICAL',
+    eventDate: 'Day 1: 10 October 2026',
+    mode: 'Offline / In Person',
+    venue: 'E.G.S. Pillay Engineering College, Nagapattinam',
+    description: 'An engineering challenge testing participants’ skill in prompt engineering, AI problem formulation, and precision output generation.',
+    participationType: 'Individual or Team of 2',
+    teamSize: '1–2 Members',
+    roundsCount: 2,
+    duration: 'Round 1 — 20 minutes; Round 2 — 30 minutes',
+    rounds: [
+      { roundNumber: 1, title: 'Precision Prompt Formulation', duration: '20 minutes', description: 'Draft targeted prompts to guide AI models to achieve exact benchmark outputs under constraint limits.' },
+      { roundNumber: 2, title: 'Complex Reasoning & System Logic', duration: '30 minutes', description: 'Solve multi-step algorithmic problems and generate optimal code solutions via chained prompt architectures.' },
+    ],
+    rules: [
+      'Only official AI sandbox interfaces approved by event coordinators are permitted.',
+      'No external communication or pre-written prompt libraries allowed.',
+      'Submissions evaluated on accuracy, efficiency, and fewest prompt iterations.',
+    ],
+    winningCriteria: 'Accuracy of generated output against target benchmarks, latency, prompt conciseness, and token efficiency.',
+    requirements: ['Personal laptop with Wi-Fi capability and Chrome browser'],
     status: 'ACTIVE',
     createdAt: new Date().toISOString(),
-    description: 'Creative poster designing and technical exhibition',
   },
   {
     eventId: 'EVT-003',
-    eventName: 'Non-Technical Event 1',
+    eventName: 'VIBE VISTA',
     category: 'NON_TECHNICAL',
-    isPlaceholder: true,
+    eventDate: 'Day 1: 10 October 2026',
+    mode: 'Offline / In Person',
+    venue: 'E.G.S. Pillay Engineering College, Nagapattinam',
+    description: 'A fun-filled event testing reflexes, hand-eye coordination, observation, and quick-thinking skills.',
+    participationType: 'Team of 2',
+    teamSize: '2 Members',
+    roundsCount: 2,
+    duration: 'Round 1 — 10 seconds; Round 2 — 1 minute',
+    rounds: [
+      { roundNumber: 1, title: 'Hand & Circle Reflex Game', duration: '10 seconds', description: 'Participants must place a closed fist on circle papers and an open palm on hand-outline papers within the time limit.' },
+      { roundNumber: 2, title: 'Number Cup Game', duration: '1 minute', description: 'Participants identify and lift the numbered cup called by the coordinator. Each team gets three chances.' },
+    ],
+    rules: [
+      'Round 1: Rapid reflex placement — closed fist on circle papers and open palm on hand outline sheets within 10 seconds.',
+      'Round 2: Listen closely to the coordinator’s call and lift the target numbered cup (maximum 3 chances per team).',
+      'Disqualification or point deduction for deliberate obstruction or false starts.',
+    ],
+    winningCriteria: 'Speed and accuracy across both rounds.',
+    requirements: ['Reflex circle & hand game sheets', 'Numbered cup set', 'Stopwatch'],
     status: 'ACTIVE',
     createdAt: new Date().toISOString(),
-    description: 'Temporary placeholder - editable by Overall Admin',
   },
   {
     eventId: 'EVT-004',
-    eventName: 'Non-Technical Event 2',
+    eventName: 'FRENZY 2K26',
     category: 'NON_TECHNICAL',
-    isPlaceholder: true,
+    eventDate: 'Day 1: 10 October 2026',
+    mode: 'Offline / In Person',
+    venue: 'E.G.S. Pillay Engineering College, Nagapattinam',
+    description: 'A three-round challenge testing skill, logic, creativity, and quick thinking.',
+    participationType: 'Team',
+    teamSize: 'Team (2–3 Members)',
+    roundsCount: 3,
+    duration: '2–5 minutes per game',
+    rounds: [
+      { roundNumber: 1, title: 'Flip & Freeze', duration: '2–3 minutes', description: 'Flip a bottle and make it land upright. It must remain standing for five seconds.' },
+      { roundNumber: 2, title: 'Puzzle Solving', duration: '3–5 minutes', description: 'Solve puzzles and brain teasers within the given time.' },
+      { roundNumber: 3, title: 'Wire Wizard', duration: '2–3 minutes', description: 'Navigate a loop through a wire course without touching the wire.' },
+    ],
+    rules: [
+      'Round 1: Bottle must stand upright unassisted for 5 seconds to count.',
+      'Round 2: Puzzle must be completely solved within the allocated time.',
+      'Round 3: Touching the wire triggers a buzzer; participant must restart that section.',
+    ],
+    winningCriteria: [
+      '10 points for successfully completing the bottle challenge.',
+      '10 points for solving the puzzle correctly.',
+      '10 points for completing the wire course.',
+      '2 bonus points for the fastest completion in a round.',
+    ],
+    requirements: ['Water bottles', 'Brain-teaser logic puzzles', 'Electrical buzz-wire obstacle apparatus', 'Timer'],
     status: 'ACTIVE',
     createdAt: new Date().toISOString(),
-    description: 'Temporary placeholder - editable by Overall Admin',
   },
   {
     eventId: 'EVT-005',
-    eventName: 'Non-Technical Event 3',
+    eventName: 'MEMORY HUNT',
     category: 'NON_TECHNICAL',
-    isPlaceholder: true,
+    eventDate: 'Day 1: 10 October 2026',
+    mode: 'Offline / In Person',
+    venue: 'E.G.S. Pillay Engineering College, Nagapattinam',
+    description: 'A memory-based game in which participants observe, remember, and identify clues while completing tasks within a given time.',
+    participationType: 'Team of 1 or 2 members',
+    teamSize: '1–2 Members (10–20 participants per session)',
+    roundsCount: 2,
+    duration: '15–20 minutes',
+    rounds: [
+      { roundNumber: 1, title: 'Image Memory', duration: '30 seconds', description: 'Participants observe images displayed for 30 seconds and answer questions after the images are hidden.' },
+      { roundNumber: 2, title: 'Memory Chain', duration: '10–12 minutes', description: 'Participants memorise a sequence of 8–12 items, numbers, or words and arrange a mixed-up list in the original order.' },
+    ],
+    rules: [
+      'No electronic devices, notes, or recording during image observation periods.',
+      'Round 1: 30 seconds observation followed by memory questionnaire.',
+      'Round 2: Sequence rearrangement must match initial order exactly.',
+    ],
+    winningCriteria: 'The team with the highest score and correct answers wins.',
+    requirements: ['Projector display & slide deck', 'Item flashcards & memory sequencing tiles', 'Official answer sheets'],
     status: 'ACTIVE',
     createdAt: new Date().toISOString(),
-    description: 'Temporary placeholder - editable by Overall Admin',
+  },
+  {
+    eventId: 'EVT-006',
+    eventName: 'THE IMPOSTER GAME',
+    category: 'NON_TECHNICAL',
+    eventDate: 'Day 1: 10 October 2026',
+    mode: 'Offline / In Person',
+    venue: 'E.G.S. Pillay Engineering College, Nagapattinam',
+    description: 'A game testing observation, communication, logical thinking, confidence, and bluffing skills. All players except one receive the same secret word. The Imposter does not know the word and must try to blend in while other players identify them.',
+    participationType: 'Individual',
+    teamSize: '3–5 participants per session',
+    roundsCount: '3 rounds + Grand Finale',
+    duration: '5–8 minutes per game',
+    rounds: [
+      { roundNumber: 1, title: 'Clue Round', duration: '2 minutes', description: 'Players give clues related to the secret word without revealing it.' },
+      { roundNumber: 2, title: 'Question & Voting Round', duration: '3 minutes', description: 'Players ask questions, discuss clues, and vote for the suspected Imposter.' },
+      { roundNumber: 3, title: 'Imposter Final Guess', duration: '1–2 minutes', description: 'If identified, the Imposter gets one final chance to guess the secret word.' },
+      { roundNumber: 4, title: 'Grand Finale', duration: '10 minutes', description: 'The top five participants qualify for the finale.' },
+    ],
+    rules: [
+      'Secret word must never be uttered directly by normal players.',
+      'Clues must be subtle yet related to the secret word; no direct rhymes or language translations.',
+      'Voting requires unanimous or majority consensus to execute elimination.',
+      'Top five participants across all preliminary sessions advance to Grand Finale.',
+    ],
+    winningCriteria: [
+      '10 points for an Imposter who successfully fools everyone.',
+      '10 points for correctly identifying the Imposter.',
+      '5 points if the caught Imposter guesses the secret word correctly.',
+      '2 bonus points for the best clue or bluff.',
+    ],
+    requirements: ['Secret word card sets', 'Voting tokens', 'Official moderator tally sheet'],
+    status: 'ACTIVE',
+    createdAt: new Date().toISOString(),
+  },
+  {
+    eventId: 'EVT-007',
+    eventName: 'Online Article Presentation',
+    category: 'ONLINE',
+    eventDate: 'Day 2: 14 October 2026',
+    mode: 'Fully Online',
+    venue: 'Online Article Presentation via Unstop',
+    description: 'Virtual academic and technical article presentation competition hosted online via Unstop platform.',
+    participationType: 'Individual or Team',
+    teamSize: '1–3 Members',
+    roundsCount: 1,
+    duration: '10 minutes per article presentation',
+    rounds: [
+      { roundNumber: 1, title: 'Virtual Article Presentation & Defense', duration: '10 minutes', description: 'Online screening and live virtual presentation conducted through the Unstop symposium portal.' },
+    ],
+    rules: [
+      'Articles must be registered and submitted via the Unstop portal.',
+      'Participants must present live with camera enabled on 14 October 2026.',
+      'Strict time control enforced by online session moderators.',
+    ],
+    winningCriteria: 'Research depth, article formatting, presentation delivery, and defense during virtual Q&A.',
+    requirements: ['Unstop registered account', 'High-speed internet & video conferencing device'],
+    status: 'ACTIVE',
+    createdAt: new Date().toISOString(),
   },
 ];
+
+const EVENTS_FILE = path.join(process.cwd(), 'events.json');
+
+function loadEvents(): EventRow[] {
+  try {
+    if (fs.existsSync(EVENTS_FILE)) {
+      const data = JSON.parse(fs.readFileSync(EVENTS_FILE, 'utf-8'));
+      if (Array.isArray(data) && data.length > 0) return data;
+    }
+  } catch (e) {
+    console.error('Failed to read events.json:', e);
+  }
+  return [...initialEvents];
+}
+
+function saveEvents(list: EventRow[]) {
+  try {
+    fs.writeFileSync(EVENTS_FILE, JSON.stringify(list, null, 2), 'utf-8');
+  } catch (e) {
+    console.error('Failed to write events.json:', e);
+  }
+}
 
 // Coordinators are managed manually by the Overall Admin using "+ Add Coordinator"
 const COORDINATORS_FILE = path.join(process.cwd(), 'coordinators.json');
@@ -290,7 +482,7 @@ function saveDeletedAttendance(set: Set<string>) {
 const db = {
   admins: [...initialAdmins],
   coordinators: loadCoordinators(),
-  events: [...initialEvents],
+  events: loadEvents(),
   participants: [] as ParticipantRow[],
   jury: [] as JuryRow[],
   attendance: [] as AttendanceRow[],
@@ -689,7 +881,22 @@ app.get('/api/events', async (req, res) => {
 });
 
 app.post('/api/events', async (req, res) => {
-  const { eventName, category, description } = req.body;
+  const {
+    eventName,
+    category,
+    description,
+    eventDate,
+    mode,
+    venue,
+    participationType,
+    teamSize,
+    roundsCount,
+    duration,
+    rounds,
+    rules,
+    winningCriteria,
+    requirements,
+  } = req.body;
   if (!eventName) {
     res.status(400).json({ success: false, error: 'Event name is required.' });
     return;
@@ -702,15 +909,43 @@ app.post('/api/events', async (req, res) => {
     status: 'ACTIVE',
     createdAt: new Date().toISOString(),
     description: description || '',
+    eventDate: eventDate || 'Day 1: 10 October 2026',
+    mode: mode || (category === 'ONLINE' ? 'Fully Online' : 'Offline / In Person'),
+    venue: venue || (category === 'ONLINE' ? 'Online Article Presentation via Unstop' : 'E.G.S. Pillay Engineering College, Nagapattinam'),
+    participationType: participationType || 'Team',
+    teamSize: teamSize || '2 Members',
+    roundsCount: roundsCount || 2,
+    duration: duration || '15–20 minutes',
+    rounds: rounds || [],
+    rules: rules || [],
+    winningCriteria: winningCriteria || '',
+    requirements: requirements || [],
   };
 
   db.events.push(newEvent);
+  saveEvents(db.events);
   res.json({ success: true, event: newEvent });
 });
 
 app.put('/api/events/:id', async (req, res) => {
   const eventId = req.params.id;
-  const { eventName, category, status, description } = req.body;
+  const {
+    eventName,
+    category,
+    status,
+    description,
+    eventDate,
+    mode,
+    venue,
+    participationType,
+    teamSize,
+    roundsCount,
+    duration,
+    rounds,
+    rules,
+    winningCriteria,
+    requirements,
+  } = req.body;
 
   const evt = db.events.find((e) => e.eventId === eventId);
   if (!evt) {
@@ -725,7 +960,19 @@ app.put('/api/events/:id', async (req, res) => {
   if (category) evt.category = category;
   if (status) evt.status = status;
   if (description !== undefined) evt.description = description;
+  if (eventDate !== undefined) evt.eventDate = eventDate;
+  if (mode !== undefined) evt.mode = mode;
+  if (venue !== undefined) evt.venue = venue;
+  if (participationType !== undefined) evt.participationType = participationType;
+  if (teamSize !== undefined) evt.teamSize = teamSize;
+  if (roundsCount !== undefined) evt.roundsCount = roundsCount;
+  if (duration !== undefined) evt.duration = duration;
+  if (rounds !== undefined) evt.rounds = rounds;
+  if (rules !== undefined) evt.rules = rules;
+  if (winningCriteria !== undefined) evt.winningCriteria = winningCriteria;
+  if (requirements !== undefined) evt.requirements = requirements;
 
+  saveEvents(db.events);
   res.json({ success: true, event: evt });
 });
 
@@ -989,6 +1236,14 @@ function isParticipantRegisteredForEvent(
     // 2. Common typo resilience (e.g. "Paper Presentaion" vs "Paper Presentation")
     if (
       (evClean.startsWith('paperpresent') && targetClean.startsWith('paperpresent')) ||
+      (evClean.startsWith('promptfest') && targetClean.startsWith('promptfest')) ||
+      (evClean.startsWith('vibevista') && targetClean.startsWith('vibevista')) ||
+      (evClean.startsWith('frenzy') && targetClean.startsWith('frenzy')) ||
+      (evClean.startsWith('memoryhunt') && targetClean.startsWith('memoryhunt')) ||
+      (evClean.startsWith('imposter') && targetClean.startsWith('imposter')) ||
+      (evClean.startsWith('theimposter') && targetClean.startsWith('theimposter')) ||
+      (evClean.startsWith('onlinearticle') && targetClean.startsWith('onlinearticle')) ||
+      (evClean.startsWith('articlepresent') && targetClean.startsWith('articlepresent')) ||
       (evClean.startsWith('postermak') && targetClean.startsWith('postermak')) ||
       (evClean.startsWith('codedebug') && targetClean.startsWith('codedebug')) ||
       (evClean.startsWith('webdesign') && targetClean.startsWith('webdesign')) ||

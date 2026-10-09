@@ -39,12 +39,32 @@ export interface AuthSession {
   expiresAt: number;
 }
 
+export type EventCategory = 'TECHNICAL' | 'NON_TECHNICAL' | 'ONLINE';
+
+export interface EventRoundDetail {
+  roundNumber: number | string;
+  title: string;
+  duration?: string;
+  description: string;
+}
+
 export interface SymposiumEvent {
   eventId: string;
   eventName: string;
   isPlaceholder?: boolean;
-  category: 'TECHNICAL' | 'NON_TECHNICAL';
+  category: EventCategory | string;
+  eventDate?: string;
+  mode?: string;
+  venue?: string;
   description?: string;
+  participationType?: string;
+  teamSize?: string;
+  roundsCount?: number | string;
+  duration?: string;
+  rounds?: EventRoundDetail[];
+  rules?: string[];
+  winningCriteria?: string | string[];
+  requirements?: string[];
   status: 'ACTIVE' | 'PAUSED' | 'COMPLETED';
   createdAt: string;
 }
