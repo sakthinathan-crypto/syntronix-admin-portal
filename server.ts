@@ -1713,15 +1713,23 @@ app.post('/api/attendance/mark', async (req, res) => {
       } catch (apiErr: any) {
         apiError = apiErr.message || 'Attendance API network communication error';
       }
-    } else {
-      // If no remote URL configured, proceed with local confirmation
-      gasAttendanceSuccess = true;
     }
 
-    // Mark PRESENT in system records
+    // If ATTENDANCE_API_URL is configured, require successful database write before reporting success
     let remoteSynced = Boolean(gasAttendanceSuccess);
-    if (!remoteSynced && apiError) {
-      console.warn(`[ATTENDANCE SYNC NOTICE] Remote Attendance API unconfirmed (${apiError}). Recording in system database.`);
+    if (ATTENDANCE_API_URL && !remoteSynced) {
+      logScan(uniqueId, participantName, coordName, assignedEvent, assignedEvent, 'ERROR', apiError || 'Attendance Database API write unconfirmed');
+      releaseLock();
+      return res.status(500).json({
+        success: false,
+        result: 'ERROR',
+        message: 'Attendance could not be recorded in database.',
+        errorDetail: apiError || 'Attendance Database API update failed.',
+        participant,
+        scannedEvent: assignedEvent,
+        coordinatorName: coordName,
+        timestamp: new Date().toISOString(),
+      });
     }
 
     const now = new Date();
