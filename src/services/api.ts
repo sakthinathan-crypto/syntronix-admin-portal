@@ -1006,15 +1006,28 @@ export async function markAttendance(
   // Fallback direct call to Attendance Database API Web App (for static Vercel deployments)
   let directErrorDetail: string | null = null;
   try {
+    const directPayload = {
+      apiKey: 'SYN26_ADMIN_7xK92pLm4Q8vZ3',
+      action: 'markAttendance',
+      uniqueId: uniqueId,
+      name: participant.name || '',
+      regNo: participant.registrationNo || participant.universityRegistrationNumber || participant.regNo || '',
+      email: participant.email || '',
+      mobile: participant.mobile || participant.mobileNumber || '',
+      college: participant.college || participant.collegeName || '',
+      fieldOfStudy: participant.fieldOfStudy || '',
+      department: participant.department || '',
+      teamName: participant.teamName || '',
+      leaderName: participant.leaderName || '',
+      membersName: participant.members || participant.membersName || '',
+      eventName: coordinatorAssignedEvent,
+      coordinatorName: coordinatorName,
+    };
+
     const directRes = await fetch(ATTENDANCE_API_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({
-        action: 'markAttendance',
-        participant,
-        coordinatorName,
-        coordinatorAssignedEvent,
-      }),
+      body: JSON.stringify(directPayload),
       redirect: 'follow',
     });
 
@@ -1027,17 +1040,63 @@ export async function markAttendance(
     }
 
     if (json) {
-      if (json.result) {
-        if (json.result === 'SUCCESS' && json.attendanceRecord) {
-          saveLocalAttendance(json.attendanceRecord);
-        }
+      const isSuccessCode = json.success === true || json.code === 'ATTENDANCE_MARKED' || json.result === 'SUCCESS';
+      const isDuplicateCode = json.code === 'QR_ALREADY_USED' || json.code === 'QR_USED' || json.result === 'ALREADY_MARKED';
+
+      if (isSuccessCode) {
+        const attRecord: AttendanceRecord = {
+          timestamp: json.attendance?.date || new Date().toISOString(),
+          uniqueId: uniqueId,
+          participantName: participant.name || '',
+          universityRegNumber: participant.registrationNo || participant.universityRegistrationNumber || '',
+          email: participant.email || '',
+          mobileNumber: participant.mobile || participant.mobileNumber || '',
+          collegeName: participant.college || participant.collegeName || '',
+          fieldOfStudy: participant.fieldOfStudy || '',
+          department: participant.department || '',
+          teamName: participant.teamName || '',
+          leaderName: participant.leaderName || '',
+          membersName: participant.members || participant.membersName || '',
+          selectedEvents: Array.isArray(participant.selectedEvents) ? participant.selectedEvents.join(', ') : String(participant.selectedEvents || ''),
+          registeredEvents: registeredEvents,
+          scannedEvent: coordinatorAssignedEvent,
+          coordinatorName: coordinatorName,
+          attendanceDate: json.attendance?.date || new Date().toISOString().split('T')[0],
+          attendanceTime: json.attendance?.time || new Date().toLocaleTimeString(),
+          attendanceStatus: 'PRESENT',
+        };
+        saveLocalAttendance(attRecord);
+
         return {
-          ...json,
+          success: true,
+          result: 'SUCCESS',
+          message: json.message || 'ATTENDANCE MARKED',
           participant: json.participant || participant,
           scannedEvent: coordinatorAssignedEvent,
-          coordinatorName,
+          coordinatorName: coordinatorName,
+          timestamp: new Date().toISOString(),
+          attendanceRecord: attRecord,
         };
       }
+
+      if (isDuplicateCode) {
+        const prev = json.previousRecord || json.previousScan || {};
+        return {
+          success: false,
+          result: 'ALREADY_MARKED',
+          message: json.message || 'Attendance Already Marked for this Event.',
+          participant,
+          scannedEvent: coordinatorAssignedEvent,
+          coordinatorName,
+          timestamp: new Date().toISOString(),
+          previousScan: {
+            coordinatorName: prev.coordinator || prev.coordinatorName || 'System Registry',
+            scanTime: prev.time || prev.scanTime || prev.date || new Date().toLocaleTimeString(),
+            scannedEvent: prev.event || prev.scannedEvent || coordinatorAssignedEvent,
+          },
+        };
+      }
+
       if (json.success === false || json.error || json.code) {
         directErrorDetail = `[HTTP ${directRes.status}] ${json.error || json.message || json.code || 'Apps Script returned unsuccessful status'}${json.code ? ` (code: ${json.code})` : ''}`;
       }

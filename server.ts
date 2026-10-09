@@ -444,7 +444,7 @@ function saveCoordinators(list: CoordinatorRow[]) {
 }
 
 // In-Memory Database Store with Disk Persistence for Deleted Records
-let ATTENDANCE_API_KEY = process.env.ATTENDANCE_API_KEY || '';
+let ATTENDANCE_API_KEY = process.env.ATTENDANCE_API_KEY || 'SYN26_ADMIN_7xK92pLm4Q8vZ3';
 
 const DELETED_COORDINATORS_FILE = getStoragePath('deleted_coordinators.json');
 const DELETED_ATTENDANCE_FILE = getStoragePath('deleted_attendance.json');
@@ -1646,11 +1646,12 @@ app.post('/api/attendance/mark', async (req, res) => {
     if (ATTENDANCE_API_URL) {
       try {
         const gasResult = await callAttendanceApiPost('markAttendance', {
+          apiKey: ATTENDANCE_API_KEY,
           action: 'markAttendance',
-          participant: { ...participant, unique_id: uniqueId, uniqueId, registeredEvents },
           uniqueId,
           unique_id: uniqueId,
           name: participantName,
+          regNo: participant.registrationNo || participant.universityRegistrationNumber || participant.regNo || '',
           registrationNo: participant.registrationNo || participant.universityRegistrationNumber || '',
           universityRegNumber: participant.registrationNo || participant.universityRegistrationNumber || '',
           email: participant.email || '',
@@ -1660,27 +1661,27 @@ app.post('/api/attendance/mark', async (req, res) => {
           fieldOfStudy: participant.fieldOfStudy || '',
           teamName: participant.teamName || '',
           leaderName: participant.leaderName || '',
-          members: participant.members || participant.membersName || '',
-          degree: participant.degree || '',
-          year: participant.year || '',
-          collegeLocation: participant.collegeLocation || '',
-          teamLeaderEmail: participant.teamLeaderEmail || '',
-          member1Mobile: participant.member1Mobile || '',
-          member2Mobile: participant.member2Mobile || '',
-          selectedEvents: participant.selectedEvents || registeredEvents.join(', '),
-          registeredEvents,
+          membersName: participant.members || participant.membersName || '',
+          eventName: assignedEvent,
           scannedEvent: assignedEvent,
           event: assignedEvent,
           coordinatorName: coordName,
-          scannedAt: new Date().toISOString(),
         });
 
         if (gasResult) {
-          if (gasResult.result === 'ALREADY_MARKED' || gasResult.message?.toLowerCase().includes('already marked') || (gasResult.success === false && gasResult.error === 'ALREADY_MARKED')) {
+          const isSuccessCode = gasResult.success === true || gasResult.code === 'ATTENDANCE_MARKED' || gasResult.result === 'SUCCESS';
+          const isDuplicateCode = gasResult.code === 'QR_ALREADY_USED' || gasResult.code === 'QR_USED' || gasResult.result === 'ALREADY_MARKED';
+
+          if (isDuplicateCode || gasResult.message?.toLowerCase().includes('already marked')) {
             const isPreviouslyDeleted = db.deletedAttendance.has(`${uniqueId.toLowerCase()}_${assignedEvent.toLowerCase()}`);
 
             if (!isPreviouslyDeleted) {
-              remotePreviousScan = gasResult.previousScan;
+              const prev = gasResult.previousRecord || gasResult.previousScan || {};
+              remotePreviousScan = {
+                coordinatorName: prev.coordinator || prev.coordinatorName || 'System Registry',
+                scanTime: prev.time || prev.scanTime || prev.date || new Date().toLocaleTimeString(),
+                scannedEvent: prev.event || prev.scannedEvent || assignedEvent,
+              };
               logScan(uniqueId, participantName, coordName, assignedEvent, assignedEvent, 'ALREADY_MARKED', 'Duplicate detected by Attendance API');
               releaseLock();
               return res.json({
@@ -1690,22 +1691,17 @@ app.post('/api/attendance/mark', async (req, res) => {
                 participant,
                 scannedEvent: assignedEvent,
                 coordinatorName: coordName,
-                previousScan: remotePreviousScan || {
-                  coordinatorName: 'System Registry',
-                  scanTime: new Date().toLocaleTimeString(),
-                  scannedEvent: assignedEvent,
-                },
+                previousScan: remotePreviousScan,
               });
             } else {
-              // Participant was explicitly removed in testing mode, allow re-scan
               gasAttendanceSuccess = true;
             }
           }
 
-          if (gasResult.success === true) {
+          if (isSuccessCode) {
             gasAttendanceSuccess = true;
           } else {
-            apiError = gasResult.error || gasResult.message || 'Attendance API authorization or execution failed';
+            apiError = gasResult.error || gasResult.message || `Attendance API error code: ${gasResult.code || 'UNCONFIRMED'}`;
           }
         } else {
           apiError = 'No response returned by Attendance API';
