@@ -52,5 +52,14 @@
     "assignedEvent": "Paper Presentation",
     "status": "ACTIVE",
     "createdAt": "2026-10-09T17:43:22.329Z"
+  },
+  {
+    "coordinatorId": "CRD-007",
+    "coordinatorName": "Sakthinathan J",
+    "email": "sakthisakthi7791@gmail.com",
+    "passwordHash": "5203c677bd28e9cdc55faa0ff008d06cd5b091e779d6a84eec8ab7121a1997e5",
+    "assignedEvent": "Paper Presentation",
+    "status": "ACTIVE",
+    "createdAt": "2026-10-09T18:10:14.230Z"
   }
 ]
